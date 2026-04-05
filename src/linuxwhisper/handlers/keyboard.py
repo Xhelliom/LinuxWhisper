@@ -1,12 +1,18 @@
 """
-Global keyboard listener with data-driven key mappings.
+Global keyboard listener using evdev.
+
+Reads key events directly from /dev/input/ devices, which works on both
+X11 and Wayland without any display server integration. Requires the
+user to be in the 'input' group.
 """
 from __future__ import annotations
 
-
+import logging
+import selectors
 from typing import Any, Dict, List, Optional
 
-from pynput import keyboard
+import evdev
+from evdev import InputDevice, categorize, ecodes
 
 from linuxwhisper.config import CFG
 from linuxwhisper.handlers.mode import ModeHandler
@@ -17,62 +23,100 @@ from linuxwhisper.services.clipboard import ClipboardService
 from linuxwhisper.services.tts import TTSService
 from linuxwhisper.state import STATE
 
+logger = logging.getLogger(__name__)
+
 
 class KeyboardHandler:
-    """Global keyboard listener with data-driven key mappings."""
+    """Global keyboard listener using evdev (works on X11 + Wayland)."""
 
-    # Generate mappings dynamically from CFG.HOTKEY_DEFS
-    # Format: mode_id -> list of all valid keys (primary + extras)
-    KEY_MAPPINGS: Dict[str, List[Any]] = {
-        mode_id: [data[1]] + data[2]
-        for mode_id, data in CFG.HOTKEY_DEFS.items()
-    }
-
-    @classmethod
-    def check_key(cls, key, target_mode: str) -> bool:
-        """Check if pressed key matches target mode."""
-        valid_keys = cls.KEY_MAPPINGS.get(target_mode, [])
-        if key in valid_keys:
-            return True
-        if hasattr(key, 'vk') and key.vk in valid_keys:
-            return True
-        return False
+    # Build a flat lookup: keycode -> mode_id
+    # for all recording modes + toggle actions
+    _KEY_TO_MODE: Dict[int, str] = {}
+    for mode_id, (_, primary, extras) in CFG.HOTKEY_DEFS.items():
+        _KEY_TO_MODE[primary] = mode_id
+        for extra in extras:
+            _KEY_TO_MODE[extra] = mode_id
 
     @classmethod
-    def get_mode_for_key(cls, key) -> Optional[str]:
-        """Get mode name for a pressed key, if any."""
-        for mode in CFG.MODES:
-            if cls.check_key(key, mode):
-                return mode
-        return None
+    def _find_keyboards(cls) -> List[InputDevice]:
+        """Discover all keyboard input devices."""
+        keyboards = []
+        for path in evdev.list_devices():
+            try:
+                dev = InputDevice(path)
+                caps = dev.capabilities()
+                # A device with EV_KEY that has typical keyboard keys
+                if ecodes.EV_KEY in caps:
+                    key_caps = caps[ecodes.EV_KEY]
+                    # Check for at least some function keys to filter out mice etc.
+                    if ecodes.KEY_F1 in key_caps or ecodes.KEY_A in key_caps:
+                        keyboards.append(dev)
+                        logger.debug("Found keyboard: %s (%s)", dev.name, dev.path)
+            except Exception:
+                continue
+
+        if not keyboards:
+            logger.warning(
+                "No keyboard devices found! "
+                "Make sure you are in the 'input' group: "
+                "sudo usermod -aG input $USER"
+            )
+        return keyboards
 
     @classmethod
-    def on_press(cls, key) -> None:
-        """Handle key press events."""
+    def _get_mode_for_keycode(cls, keycode: int) -> Optional[str]:
+        """Get mode name for a keycode, if any."""
+        return cls._KEY_TO_MODE.get(keycode)
+
+    @classmethod
+    def _is_recording_mode(cls, mode: str) -> bool:
+        """Check if a mode triggers audio recording."""
+        return mode in CFG.MODES
+
+    @classmethod
+    def _handle_key_event(cls, event: evdev.InputEvent) -> None:
+        """Process a single key event."""
+        key_event = categorize(event)
+        keycode = event.code
+
+        mode = cls._get_mode_for_keycode(keycode)
+        if mode is None:
+            return
+
+        # Key DOWN
+        if key_event.keystate == key_event.key_down:
+            cls._on_press(mode)
+
+        # Key UP
+        elif key_event.keystate == key_event.key_up:
+            cls._on_release(mode)
+
+    @classmethod
+    def _on_press(cls, mode: str) -> None:
+        """Handle key press for a recognized mode."""
         # Pin toggle (non-recording action)
-        if cls.check_key(key, "pin"):
+        if mode == "pin":
             if not STATE.recording:
                 ChatManager.toggle_pin()
             return
 
         # TTS toggle (non-recording action)
-        if cls.check_key(key, "tts"):
+        if mode == "tts":
             if not STATE.recording:
                 TTSService.toggle()
             return
 
         # Toggle mode: pressing same key again stops recording
         if STATE.recording and STATE.toggle_mode:
-            if cls.check_key(key, STATE.current_mode):
+            if mode == STATE.current_mode:
                 cls._stop_and_process()
             return
 
         if STATE.recording:
             return
 
-        # Check for recording mode keys
-        mode = cls.get_mode_for_key(key)
-        if mode:
+        # Start recording for this mode
+        if cls._is_recording_mode(mode):
             STATE.current_mode = mode
 
             # For rewrite mode, copy selected text first
@@ -83,17 +127,17 @@ class KeyboardHandler:
             AudioService.start_recording()
 
     @classmethod
-    def on_release(cls, key) -> None:
-        """Handle key release events."""
+    def _on_release(cls, mode: str) -> None:
+        """Handle key release for a recognized mode."""
         if not STATE.recording:
             return
 
-        # In toggle mode, release does nothing (stop is handled in on_press)
+        # In toggle mode, release does nothing
         if STATE.toggle_mode:
             return
 
         # Hold mode: release key stops recording
-        if cls.check_key(key, STATE.current_mode):
+        if mode == STATE.current_mode:
             cls._stop_and_process()
 
     @classmethod
@@ -109,6 +153,43 @@ class KeyboardHandler:
 
     @classmethod
     def run(cls) -> None:
-        """Start keyboard listener in current thread."""
-        with keyboard.Listener(on_press=cls.on_press, on_release=cls.on_release) as listener:
-            listener.join()
+        """
+        Start the evdev keyboard listener (blocking).
+
+        Monitors all keyboard devices using a selector for efficient I/O.
+        Runs in a background thread — started from app.py.
+        """
+        keyboards = cls._find_keyboards()
+        if not keyboards:
+            print(
+                "❌ No keyboard devices accessible.\n"
+                "   Run: sudo usermod -aG input $USER\n"
+                "   Then log out and back in."
+            )
+            return
+
+        print(f"⌨️  Listening on {len(keyboards)} keyboard device(s)")
+
+        sel = selectors.DefaultSelector()
+        for dev in keyboards:
+            sel.register(dev, selectors.EVENT_READ)
+
+        try:
+            while True:
+                for key, _ in sel.select():
+                    device = key.fileobj
+                    try:
+                        for event in device.read():
+                            if event.type == ecodes.EV_KEY:
+                                cls._handle_key_event(event)
+                    except OSError:
+                        # Device disconnected — unregister and continue
+                        logger.warning("Device disconnected: %s", device.path)
+                        sel.unregister(device)
+                        if not sel.get_map():
+                            logger.error("All keyboard devices disconnected!")
+                            break
+        except Exception as e:
+            logger.error("Keyboard listener error: %s", e)
+        finally:
+            sel.close()

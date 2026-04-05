@@ -6,12 +6,12 @@ from __future__ import annotations
 import threading
 
 import numpy as np
-import pyperclip
 
 from linuxwhisper.decorators import run_on_main_thread
 from linuxwhisper.managers.chat import ChatManager
 from linuxwhisper.managers.history import HistoryManager
 from linuxwhisper.managers.overlay import OverlayManager
+from linuxwhisper.platform import get_clipboard
 from linuxwhisper.services.ai import AIService
 from linuxwhisper.services.audio import AudioService
 from linuxwhisper.services.clipboard import ClipboardService
@@ -110,7 +110,8 @@ class ModeHandler:
     @staticmethod
     def _handle_ai_rewrite(text: str) -> None:
         """Handle AI rewrite mode: rewrite selected text based on instruction."""
-        original = pyperclip.paste().strip()
+        clipboard = get_clipboard()
+        original = clipboard.paste().strip()
         prompt = (
             f"INSTRUCTION:\n{text}\n\n"
             f"ORIGINAL TEXT:\n{original}\n\n"

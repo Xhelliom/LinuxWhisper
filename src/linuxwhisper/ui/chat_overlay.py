@@ -1,5 +1,8 @@
 """
 Chat overlay using WebKit2 with HTML/CSS/JS rendering.
+
+On Wayland: uses gtk-layer-shell for proper overlay anchoring (right edge).
+On X11: uses classic GTK window hints with free positioning + drag.
 """
 from __future__ import annotations
 
@@ -9,15 +12,26 @@ import re
 from typing import Callable, Dict, List, Optional
 
 import cairo
-import pyperclip
 
 from linuxwhisper.config import CFG
+from linuxwhisper.platform import SESSION_TYPE, get_clipboard
 from linuxwhisper.state import STATE
 
 import gi
 gi.require_version('Gtk', '3.0')
 gi.require_version('WebKit2', '4.1')
 from gi.repository import Gdk, GLib, Gtk, WebKit2
+
+# Optional gtk-layer-shell for Wayland
+try:
+    gi.require_version('GtkLayerShell', '0.1')
+    from gi.repository import GtkLayerShell
+    HAS_LAYER_SHELL = True
+except (ValueError, ImportError):
+    HAS_LAYER_SHELL = False
+
+# Use layer-shell only on Wayland when available
+USE_LAYER_SHELL = HAS_LAYER_SHELL and SESSION_TYPE == "wayland"
 
 
 # ---------------------------------------------------------------------------
@@ -303,11 +317,9 @@ class ChatOverlay(Gtk.Window):
     def _setup_window(self) -> None:
         """Configure window properties."""
         self.set_decorated(False)
-        self.set_keep_above(True)
         self.set_skip_taskbar_hint(True)
         self.set_skip_pager_hint(True)
         self.set_app_paintable(True)
-        self.set_type_hint(Gdk.WindowTypeHint.UTILITY)
 
         # Transparency
         screen = self.get_screen()
@@ -315,14 +327,36 @@ class ChatOverlay(Gtk.Window):
         if visual and screen.is_composited():
             self.set_visual(visual)
 
-        # Position at right edge
-        display = Gdk.Display.get_default()
-        monitor = display.get_primary_monitor() or display.get_monitor(0)
-        geometry = monitor.get_geometry()
         w, h = 340, 450
-        x = geometry.x + geometry.width - w - 20
-        y = geometry.y + (geometry.height - h) // 2
-        self.move(x, y)
+
+        if USE_LAYER_SHELL:
+            # --- Wayland: gtk-layer-shell ---
+            GtkLayerShell.init_for_window(self)
+            GtkLayerShell.set_layer(self, GtkLayerShell.Layer.TOP)
+            GtkLayerShell.set_namespace(self, "linuxwhisper-chat")
+
+            # Anchor to right edge, vertically centered via margins
+            GtkLayerShell.set_anchor(self, GtkLayerShell.Edge.RIGHT, True)
+            GtkLayerShell.set_anchor(self, GtkLayerShell.Edge.TOP, False)
+            GtkLayerShell.set_anchor(self, GtkLayerShell.Edge.BOTTOM, False)
+            GtkLayerShell.set_margin(self, GtkLayerShell.Edge.RIGHT, 20)
+
+            # Allow keyboard interaction for WebView
+            GtkLayerShell.set_keyboard_mode(
+                self, GtkLayerShell.KeyboardMode.ON_DEMAND
+            )
+        else:
+            # --- X11: classic approach ---
+            self.set_keep_above(True)
+            self.set_type_hint(Gdk.WindowTypeHint.UTILITY)
+
+            display = Gdk.Display.get_default()
+            monitor = display.get_primary_monitor() or display.get_monitor(0)
+            geometry = monitor.get_geometry()
+            x = geometry.x + geometry.width - w - 20
+            y = geometry.y + (geometry.height - h) // 2
+            self.move(x, y)
+
         self.set_default_size(w, h)
 
     def _on_draw_window(self, widget: Gtk.Window, cr: cairo.Context) -> bool:
@@ -361,6 +395,9 @@ class ChatOverlay(Gtk.Window):
 
             action = msg.get('action')
             if action == 'Drag':
+                if USE_LAYER_SHELL:
+                    # Layer-shell windows cannot be moved via drag
+                    return
                 display = self.get_display()
                 seat = display.get_default_seat()
                 pointer = seat.get_pointer()
@@ -368,7 +405,8 @@ class ChatOverlay(Gtk.Window):
                 self.begin_move_drag(1, x, y, Gtk.get_current_event_time())
             elif action == 'CopyContent':
                 content = msg.get('content', '')
-                pyperclip.copy(content)
+                clipboard = get_clipboard()
+                clipboard.copy(content)
         except Exception as e:
             print(f"❌ ScriptMessage Error: {e}")
 
@@ -532,7 +570,8 @@ class ChatOverlay(Gtk.Window):
                     idx = int(uri.split("copy://")[1])
                     if 0 <= idx < len(STATE.chat_messages):
                         text = STATE.chat_messages[idx]["text"]
-                        pyperclip.copy(text)
+                        clipboard = get_clipboard()
+                        clipboard.copy(text)
                 except Exception:
                     pass
                 decision.ignore()

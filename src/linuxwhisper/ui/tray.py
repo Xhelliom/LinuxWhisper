@@ -9,13 +9,15 @@ from typing import Callable, Dict
 
 from linuxwhisper.config import CFG
 from linuxwhisper.decorators import run_on_main_thread
-from linuxwhisper.state import STATE
+from linuxwhisper.state import STATE, HAS_APP_INDICATOR
 
 import gi
-gi.require_version('AyatanaAppIndicator3', '0.1')
 gi.require_version('Gtk', '3.0')
-from gi.repository import AyatanaAppIndicator3 as AppIndicator
 from gi.repository import Gtk
+
+if HAS_APP_INDICATOR:
+    gi.require_version('AyatanaAppIndicator3', '0.1')
+    from gi.repository import AyatanaAppIndicator3 as AppIndicator
 
 
 class TrayManager:
@@ -24,6 +26,12 @@ class TrayManager:
     @staticmethod
     def start() -> None:
         """Initialize and start system tray."""
+        if not HAS_APP_INDICATOR:
+            print("⚠️ AyatanaAppIndicator3 not available — running without tray icon.")
+            print("   Install: libayatana-appindicator (Arch) or gir1.2-ayatanaappindicator3-0.1 (Debian)")
+            Gtk.main()
+            return
+
         STATE.indicator = AppIndicator.Indicator.new(
             "linuxwhisper",
             "emblem-favorite",

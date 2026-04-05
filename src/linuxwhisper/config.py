@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
-from pynput import keyboard
+from evdev import ecodes
 
 
 @dataclass(frozen=True)
@@ -131,14 +131,16 @@ class Config:
         "vision":     {"icon": "📸", "text": "Vision Mode...",  "bg": "bg", "fg": "accent"},
     })
 
-    # format: "id": (Label_fuer_UI, Primary_Key, List_of_Extra_VKs_or_MediaKeys)
-    HOTKEY_DEFS: Dict[str, Tuple[str, Any, List[Any]]] = field(default_factory=lambda: {
-        "dictation":  ("F3",  keyboard.Key.f3, [269025098, 65027]),
-        "ai":         ("F4",  keyboard.Key.f4, [269025099, keyboard.Key.cmd_r]),
-        "ai_rewrite": ("F7",  keyboard.Key.f7, [keyboard.Key.media_previous]),
-        "vision":     ("F8",  keyboard.Key.f8, [keyboard.Key.media_play_pause]),
-        "pin":        ("F9",  keyboard.Key.f9, [269025047, keyboard.Key.media_next]),
-        "tts":        ("F10", keyboard.Key.f10, [keyboard.Key.media_volume_mute]),
+    # --- Hotkey Definitions ---
+    # format: "id": (Label, PrimaryKeycode, [ExtraKeycodes])
+    # Uses evdev ecodes — works on both X11 and Wayland.
+    HOTKEY_DEFS: Dict[str, Tuple[str, int, List[int]]] = field(default_factory=lambda: {
+        "dictation":  ("F3",  ecodes.KEY_F3,  [ecodes.KEY_F13]),
+        "ai":         ("F4",  ecodes.KEY_F4,  [ecodes.KEY_F14]),
+        "ai_rewrite": ("F7",  ecodes.KEY_F7,  [ecodes.KEY_PREVIOUSSONG]),
+        "vision":     ("F8",  ecodes.KEY_F8,  [ecodes.KEY_PLAYPAUSE]),
+        "pin":        ("F9",  ecodes.KEY_F9,  [ecodes.KEY_NEXTSONG]),
+        "tts":        ("F10", ecodes.KEY_F10, [ecodes.KEY_MUTE]),
     })
 
 

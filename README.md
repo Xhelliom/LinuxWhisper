@@ -30,6 +30,27 @@
 
 ---
 
+## 🖥️ Supported Platforms
+
+| Distribution | Display Server | Status |
+|:---|:---|:---|
+| **Debian / Ubuntu** | X11 | ✅ Fully supported |
+| **Debian / Ubuntu** | Wayland | ✅ Supported |
+| **Arch Linux** | X11 | ✅ Supported |
+| **Arch Linux** | Wayland / **Niri** | ✅ Fully supported |
+
+The app auto-detects your session type (X11 or Wayland) and uses the appropriate backends:
+
+| Feature | X11 | Wayland |
+|:---|:---|:---|
+| Clipboard | `xclip` | `wl-clipboard` |
+| Key Simulation | `xdotool` | `wtype` |
+| Screenshots | `gnome-screenshot` | `grim` |
+| Overlays | GTK Window Hints | `gtk-layer-shell` |
+| Global Hotkeys | `evdev` | `evdev` |
+
+---
+
 ## ⌨️ Command Center
 
 | Key | Action | Purpose |
@@ -46,14 +67,21 @@
 ## 🛠️ Quick Start
 
 ### 1. Requirements
-*   **Linux** (Ubuntu/Debian recommended)
+*   **Linux** (Debian/Ubuntu or Arch Linux)
 *   **Groq API Key**: [Get your free key here](https://console.groq.com)
+*   **User in `input` group** (for global hotkeys):
+    ```bash
+    sudo usermod -aG input $USER
+    # Log out and back in after this
+    ```
 
 ### 2. Installation
 ```bash
 git clone https://github.com/Dianjeol/LinuxWhisper.git && cd LinuxWhisper
 ./setup.sh
 ```
+
+The setup script automatically detects your distribution and session type, then installs the correct packages.
 
 ### 3. Launch
 ```bash
@@ -72,7 +100,23 @@ python -m linuxwhisper
 
 ---
 
+### Niri Users
 
+For best overlay behaviour, add these rules to `~/.config/niri/config.kdl`:
+
+```kdl
+layer-rule {
+    match namespace="linuxwhisper-recording"
+    shadow { on false }
+}
+
+layer-rule {
+    match namespace="linuxwhisper-chat"
+    shadow { on false }
+}
+```
+
+---
 
 ## 📂 Project Structure
 
@@ -85,22 +129,27 @@ src/linuxwhisper/
 ├── state.py             # AppState + SettingsManager + STATE
 ├── api.py               # Groq client initialization
 ├── decorators.py        # safe_execute, run_on_main_thread
+├── platform/
+│   ├── __init__.py      # Session detection + backend factory
+│   ├── base.py          # Abstract base classes (ABCs)
+│   ├── x11.py           # X11 backends (xdotool, xclip, gnome-screenshot)
+│   └── wayland.py       # Wayland backends (wtype, wl-clipboard, grim)
 ├── services/
 │   ├── audio.py         # AudioService (recording + transcription)
 │   ├── ai.py            # AIService (chat + vision)
 │   ├── tts.py           # TTSService (Orpheus voice)
-│   ├── clipboard.py     # ClipboardService (xdotool + pyperclip)
-│   └── image.py         # ImageService (screenshots)
+│   ├── clipboard.py     # ClipboardService (uses platform backends)
+│   └── image.py         # ImageService (uses platform backends)
 ├── managers/
 │   ├── history.py       # HistoryManager (conversation + tray history)
 │   ├── chat.py          # ChatManager (overlay state + auto-hide)
 │   └── overlay.py       # OverlayManager (recording indicator)
 ├── ui/
-│   ├── recording_overlay.py  # GtkOverlay (waveform visualization)
-│   ├── chat_overlay.py       # ChatOverlay (WebKit2 + HTML/CSS/JS)
+│   ├── recording_overlay.py  # GtkOverlay (waveform + gtk-layer-shell)
+│   ├── chat_overlay.py       # ChatOverlay (WebKit2 + gtk-layer-shell)
 │   ├── settings_dialog.py    # SettingsDialog (voice, schemes, hotkeys)
 │   └── tray.py               # TrayManager (AppIndicator)
 └── handlers/
     ├── mode.py           # ModeHandler (dictation/AI/rewrite/vision)
-    └── keyboard.py       # KeyboardHandler (pynput hotkey listener)
+    └── keyboard.py       # KeyboardHandler (evdev listener)
 ```
