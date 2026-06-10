@@ -62,6 +62,7 @@ class SettingsDialog:
     _whisper_status: Optional[Gtk.Label] = None
     _hotkey_entries: Optional[dict] = None
     _hotkey_status: Optional[Gtk.Label] = None
+    _hotkey_capture_btns: Optional[list] = None
 
     # Live widget handles (set while the dialog is open).
     _backend_combo: Optional[Gtk.ComboBoxText] = None
@@ -434,6 +435,7 @@ class SettingsDialog:
         grid.set_column_spacing(12)
         grid.set_row_spacing(6)
         cls._hotkey_entries = {}
+        cls._hotkey_capture_btns = []
 
         for i, (mode_id, (_label, primary, extras)) in enumerate(CFG.HOTKEY_DEFS.items()):
             name = cls._HOTKEY_LABELS.get(mode_id, mode_id.replace("_", " ").title())
@@ -443,17 +445,24 @@ class SettingsDialog:
             entry.set_hexpand(True)
             names = [cls._keycode_to_name(c) for c in [primary, *extras]]
             entry.set_text(" ".join(n for n in names if n))
+
+            capture_btn = Gtk.Button(label="⌨ Set")
+            capture_btn.set_tooltip_text("Press a key to bind it (no need to know its name)")
+            capture_btn.connect("clicked", cls._on_capture_hotkey, mode_id, entry)
+
             grid.attach(lbl, 0, i, 1, 1)
             grid.attach(entry, 1, i, 1, 1)
+            grid.attach(capture_btn, 2, i, 1, 1)
             cls._hotkey_entries[mode_id] = entry
+            cls._hotkey_capture_btns.append(capture_btn)
 
         vbox.pack_start(grid, False, False, 0)
 
         hint = Gtk.Label()
         hint.set_halign(Gtk.Align.START)
         hint.set_markup(
-            "<small><i>Space-separated evdev key names (first = primary, rest = aliases), "
-            "e.g. <tt>RIGHTALT F3 F13</tt>. Applied after a service restart.</i></small>"
+            "<small><i>Click <b>⌨ Set</b> then press the key — or type space-separated "
+            "evdev names (first = primary, rest = aliases). Applied after a service restart.</i></small>"
         )
         vbox.pack_start(hint, False, False, 0)
 
@@ -512,6 +521,39 @@ class SettingsDialog:
     def _set_hotkey_status(cls, markup: str) -> None:
         if cls._hotkey_status:
             cls._hotkey_status.set_markup(f"<small>{markup}</small>")
+
+    @classmethod
+    def _set_capture_enabled(cls, enabled: bool) -> None:
+        for b in (cls._hotkey_capture_btns or []):
+            b.set_sensitive(enabled)
+
+    @classmethod
+    def _on_capture_hotkey(cls, _btn: Gtk.Button, mode_id: str, entry: Gtk.Entry) -> None:
+        """Capture the next key press and put its evdev name in the entry."""
+        import threading
+        label = cls._HOTKEY_LABELS.get(mode_id, mode_id)
+        cls._set_capture_enabled(False)
+        cls._set_hotkey_status(f"⌨ Press a key for <b>{label}</b>… (6s)")
+
+        def work():
+            from gi.repository import GLib
+            from linuxwhisper.handlers.keyboard import KeyboardHandler
+            name = KeyboardHandler.capture_next_key()
+
+            def done():
+                if name:
+                    entry.set_text(name)
+                    cls._set_hotkey_status(
+                        f"✓ Captured <b>{name}</b> for {label} — click <b>Apply hotkeys</b> to save."
+                    )
+                else:
+                    cls._set_hotkey_status("⚠️ No key captured (timed out or no input device).")
+                cls._set_capture_enabled(True)
+                return False
+
+            GLib.idle_add(done)
+
+        threading.Thread(target=work, daemon=True).start()
 
     @staticmethod
     def _on_voice_changed(combo: Gtk.ComboBoxText) -> None:
