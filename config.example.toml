@@ -7,19 +7,36 @@
 [transcription]
 # Whisper model served by Groq (this app uses the Groq Cloud API, not a local
 # model — so values like "base.en" do NOT work here).
+#   whisper-large-v3        — most accurate
+#   whisper-large-v3-turbo  — faster / lower latency
 model = "whisper-large-v3"
 # Force a transcription language as an ISO-639-1 code, e.g. "en", "fr", "de".
 # Omit or leave "" to let Whisper autodetect.
 language = ""
-# Capture sample rate in Hz. Whisper resamples to 16 kHz internally, so 16000
-# uploads less data with no quality loss; 44100 is the historical default.
+# Capture sample rate in Hz.
 sample_rate = 44100
+# Resample to this rate before upload (Whisper runs at 16 kHz → smaller upload,
+# lower latency, no quality loss). 0 disables resampling.
+upload_sample_rate = 16000
+# Ignore clips shorter than this many seconds (filters key-click noise). 0 = off.
+min_audio_sec = 0.5
+# Phrases discarded as silence-hallucinations (lowercased, trailing .!? stripped).
+# Overrides the built-in EN/DE/FR defaults entirely if set.
+# hallucinations = ["merci", "sous-titres", "thank you"]
 
 [models]
 # Groq chat / vision / TTS model ids.
 chat = "moonshotai/kimi-k2-instruct"
 vision = "meta-llama/llama-4-scout-17b-16e-instruct"
 tts = "canopylabs/orpheus-v1-english"
+
+[clipboard]
+# Delays (seconds) around the paste-and-restore dance. Lower = snappier, but too
+# low can race the target app / clipboard manager.
+paste_delay = 0.05
+restore_delay = 0.03
+# Cache window for focused-window/terminal detection (avoids repeated `niri msg`).
+terminal_cache_ttl = 0.2
 
 [hotkeys]
 # evdev key names without the KEY_ prefix (case-insensitive). The first entry is

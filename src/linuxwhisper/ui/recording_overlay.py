@@ -89,11 +89,18 @@ class GtkOverlay(Gtk.Window):
 
     def _setup_ui(self) -> None:
         """Setup drawing area and animation."""
+        self.transcribing = False
+        self._tick = 0
         self.drawing_area = Gtk.DrawingArea()
         self.drawing_area.set_size_request(CFG.OVERLAY_WIDTH, CFG.OVERLAY_HEIGHT)
         self.drawing_area.connect("draw", self._on_draw)
         self.add(self.drawing_area)
         self.timeout_id = GLib.timeout_add(40, self._animate)
+
+    def set_transcribing(self) -> None:
+        """Switch the overlay to the post-recording 'transcribing' state."""
+        self.transcribing = True
+        self.drawing_area.queue_draw()
 
     def _on_draw(self, widget: Gtk.DrawingArea, cr: cairo.Context) -> None:
         """Draw overlay content."""
@@ -107,23 +114,29 @@ class GtkOverlay(Gtk.Window):
         cr.set_source_rgba(*bg_rgb, 0.92)
         cr.fill()
 
+        icon = "📝" if self.transcribing else self.config["icon"]
+        text = "Transcription…" if self.transcribing else self.config["text"]
+
         # Icon
         cr.set_source_rgb(*fg_rgb)
         cr.select_font_face("Ubuntu", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
         cr.set_font_size(20)
-        ext = cr.text_extents(self.config["icon"])
+        ext = cr.text_extents(icon)
         cr.move_to(30 - ext.width / 2, h / 2 + ext.height / 2)
-        cr.show_text(self.config["icon"])
+        cr.show_text(icon)
 
         # Text
         cr.set_font_size(10)
         cr.select_font_face("Ubuntu", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
-        ext = cr.text_extents(self.config["text"])
+        ext = cr.text_extents(text)
         cr.move_to(110 - ext.width / 2, 20)
-        cr.show_text(self.config["text"])
+        cr.show_text(text)
 
-        # Waveform
-        self._draw_waveform(cr, 60, 210, 45, fg_rgb)
+        # Activity area: pulsing dots while transcribing, waveform while recording
+        if self.transcribing:
+            self._draw_pulse(cr, 60, 210, 45, fg_rgb)
+        else:
+            self._draw_waveform(cr, 60, 210, 45, fg_rgb)
 
     def _draw_rounded_rect(self, cr: cairo.Context, w: int, h: int, r: int) -> None:
         """Draw rounded rectangle path."""
@@ -177,8 +190,21 @@ class GtkOverlay(Gtk.Window):
             cr.line_to(x2, cy)
             cr.stroke()
 
+    def _draw_pulse(self, cr: cairo.Context, x1: int, x2: int, cy: int, color: Tuple[float, ...]) -> None:
+        """Draw three pulsing dots to signal transcription in progress."""
+        num_dots = 3
+        spacing = (x2 - x1) / (num_dots + 1)
+        for i in range(num_dots):
+            # Phase-shifted sine per dot for a left-to-right pulse.
+            phase = self._tick / 6.0 - i * 0.7
+            alpha = 0.35 + 0.65 * (0.5 + 0.5 * math.sin(phase))
+            cr.set_source_rgba(*color, alpha)
+            cr.arc(x1 + spacing * (i + 1), cy, 4, 0, 2 * math.pi)
+            cr.fill()
+
     def _animate(self) -> bool:
         """Animation tick."""
+        self._tick += 1
         self.drawing_area.queue_draw()
         return True
 

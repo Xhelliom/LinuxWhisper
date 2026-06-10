@@ -163,11 +163,13 @@ class KeyboardHandler:
         to the main loop, stop_recording() is not a GTK call, and
         transcription + processing run in a worker thread.
         """
-        OverlayManager.hide()
+        OverlayManager.set_transcribing()
         audio_data = AudioService.stop_recording()
 
         if audio_data is not None:
             ModeHandler.process_audio_async(STATE.current_mode, audio_data)
+        else:
+            OverlayManager.hide()
 
     # Re-scan interval (seconds) to pick up keyboards that (re)appear, e.g.
     # after resume from suspend or USB hotplug.

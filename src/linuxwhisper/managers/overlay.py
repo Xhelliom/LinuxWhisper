@@ -33,6 +33,16 @@ class OverlayManager:
 
     @staticmethod
     @run_on_main_thread
+    def set_transcribing() -> None:
+        """Switch the current overlay to the 'transcribing' state (if shown)."""
+        if STATE.overlay_window:
+            try:
+                STATE.overlay_window.set_transcribing()
+            except Exception:
+                pass
+
+    @staticmethod
+    @run_on_main_thread
     def hide() -> None:
         """Hide overlay."""
         OverlayManager._hide_impl()

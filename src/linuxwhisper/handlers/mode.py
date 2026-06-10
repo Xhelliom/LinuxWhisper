@@ -37,11 +37,13 @@ class ModeHandler:
             return
 
         print("🛑 Voice Stop Triggered (Silence)")
-        OverlayManager.hide()
+        OverlayManager.set_transcribing()
         audio_data = AudioService.stop_recording()
 
         if audio_data is not None:
             ModeHandler.process_audio_async(STATE.current_mode, audio_data)
+        else:
+            OverlayManager.hide()
 
     @staticmethod
     def process_audio_async(mode: str, audio_data: np.ndarray) -> None:
@@ -71,6 +73,9 @@ class ModeHandler:
         if transcribed:
             # Run processing (API calls etc) on the GTK main thread
             GLib.idle_add(lambda: ModeHandler.process(mode, transcribed, generation))
+        else:
+            # Nothing to insert (too short / failed) — clear the indicator.
+            OverlayManager.hide()
 
     @staticmethod
     def process(mode: str, transcribed_text: str, generation: Optional[int] = None) -> None:
@@ -80,6 +85,7 @@ class ModeHandler:
         # transcription was in flight.
         if generation is not None and generation != STATE.recording_generation:
             print(f"⏭️ Ignored stale transcription (gen {generation}): '{transcribed_text}'")
+            OverlayManager.hide()
             return
 
         # --- Hallucination Guard ---
@@ -88,6 +94,7 @@ class ModeHandler:
         clean = transcribed_text.strip().lower().rstrip(".!?")
         if clean in CFG.HALLUCINATIONS or len(clean) < 2:
             print(f"⚠️ Ignored Hallucination: '{transcribed_text}'")
+            OverlayManager.hide()
             return
 
         handlers = {
@@ -97,8 +104,12 @@ class ModeHandler:
             "vision": ModeHandler._handle_vision,
         }
         handler = handlers.get(mode)
-        if handler and transcribed_text:
-            handler(transcribed_text)
+        try:
+            if handler and transcribed_text:
+                handler(transcribed_text)
+        finally:
+            # Clear the 'transcribing' indicator once insertion is done.
+            OverlayManager.hide()
 
     @staticmethod
     def _handle_dictation(text: str) -> None:

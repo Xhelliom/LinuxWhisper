@@ -6,7 +6,7 @@ from __future__ import annotations
 import subprocess
 import threading
 
-from linuxwhisper.api import GROQ_CLIENT
+from linuxwhisper.api import get_client
 from linuxwhisper.config import CFG
 from linuxwhisper.state import STATE
 
@@ -22,7 +22,7 @@ class TTSService:
 
         def _speak_thread():
             try:
-                response = GROQ_CLIENT.audio.speech.create(
+                response = get_client().audio.speech.create(
                     model=CFG.MODEL_TTS,
                     voice=STATE.tts_voice,
                     input=text[:CFG.TTS_MAX_CHARS],
