@@ -63,6 +63,8 @@ class SettingsDialog:
     _hotkey_entries: Optional[dict] = None
     _hotkey_status: Optional[Gtk.Label] = None
     _hotkey_capture_btns: Optional[list] = None
+    _key_entries: Optional[dict] = None
+    _key_status: Optional[Gtk.Label] = None
 
     # Live widget handles (set while the dialog is open).
     _backend_combo: Optional[Gtk.ComboBoxText] = None
@@ -112,6 +114,9 @@ class SettingsDialog:
 
         # --- Transcription Section ---
         cls._build_transcription_section(vbox)
+
+        # --- API Keys Section ---
+        cls._build_api_keys_section(vbox)
 
         # --- Color Scheme Gallery ---
         scheme_label = Gtk.Label()
@@ -414,6 +419,90 @@ class SettingsDialog:
             if text.lower() == lbl.lower():
                 return code
         return text  # assume the user typed a raw code
+
+    # -----------------------------------------------------------------
+    # API keys section (#stored in secrets.env, applied live)
+    # -----------------------------------------------------------------
+    @classmethod
+    def _build_api_keys_section(cls, vbox: Gtk.Box) -> None:
+        import os
+        from linuxwhisper.secrets import MANAGED_KEYS, SECRETS_FILE, read_secrets
+
+        header = Gtk.Label()
+        header.set_halign(Gtk.Align.START)
+        header.set_markup("<b>API Keys</b>")
+        vbox.pack_start(header, False, False, 6)
+
+        stored = read_secrets()
+        grid = Gtk.Grid()
+        grid.set_column_spacing(10)
+        grid.set_row_spacing(6)
+        cls._key_entries = {}
+
+        for i, (key, label) in enumerate(MANAGED_KEYS.items()):
+            lbl = Gtk.Label(label=label + ":")
+            lbl.set_halign(Gtk.Align.START)
+            entry = Gtk.Entry()
+            entry.set_hexpand(True)
+            entry.set_visibility(False)  # masked
+            entry.set_text(stored.get(key, ""))
+            # If a key is active via the inherited env (e.g. environment.d) but
+            # not stored here, hint that without exposing it.
+            if not stored.get(key) and os.environ.get(key):
+                entry.set_placeholder_text("(set via environment — type to override)")
+            grid.attach(lbl, 0, i, 1, 1)
+            grid.attach(entry, 1, i, 1, 1)
+            cls._key_entries[key] = entry
+
+        vbox.pack_start(grid, False, False, 0)
+
+        controls = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        save_btn = Gtk.Button(label="Save keys")
+        save_btn.connect("clicked", cls._on_save_keys)
+        controls.pack_start(save_btn, False, False, 0)
+        show_chk = Gtk.CheckButton(label="Show")
+        show_chk.connect("toggled", cls._on_toggle_key_visibility)
+        controls.pack_start(show_chk, False, False, 0)
+        cls._key_status = Gtk.Label()
+        cls._key_status.set_halign(Gtk.Align.START)
+        cls._key_status.set_line_wrap(True)
+        controls.pack_start(cls._key_status, True, True, 0)
+        vbox.pack_start(controls, False, False, 0)
+
+        hint = Gtk.Label()
+        hint.set_halign(Gtk.Align.START)
+        hint.set_markup(
+            f"<small><i>Stored in <tt>{SECRETS_FILE}</tt> (chmod 600), loaded at "
+            "startup — persists across reboot. Applied live on save.</i></small>"
+        )
+        vbox.pack_start(hint, False, False, 0)
+
+    @classmethod
+    def _on_toggle_key_visibility(cls, chk: Gtk.CheckButton) -> None:
+        for entry in (cls._key_entries or {}).values():
+            entry.set_visibility(chk.get_active())
+
+    @classmethod
+    def _on_save_keys(cls, _btn: Gtk.Button) -> None:
+        from linuxwhisper.secrets import save_secrets
+        values = {k: e.get_text() for k, e in (cls._key_entries or {}).items()}
+        try:
+            save_secrets(values)
+        except OSError as e:
+            cls._key_status.set_markup(f"<small>❌ {e}</small>")
+            return
+        # Re-evaluate backends now that keys changed.
+        from linuxwhisper import config as config_module
+        from linuxwhisper.transcription import reconfigure_dispatcher
+        reconfigure_dispatcher(config_module.reload_config())
+        n = sum(1 for v in values.values() if v.strip())
+        cls._key_status.set_markup(
+            f"<small>✓ Saved {n} key(s) (chmod 600) &amp; applied live.</small>"
+        )
+        # Refresh the transcription status hint if it's showing an availability warning.
+        if cls._backend_combo is not None:
+            cls._sync_model_entry()
+        print("🔑 API keys saved & applied.")
 
     # -----------------------------------------------------------------
     # Hotkeys section (editable)

@@ -16,11 +16,16 @@ warnings.filterwarnings("ignore", message=".*Specified provider 'CUDAExecutionPr
 
 from linuxwhisper.config import CFG
 from linuxwhisper.handlers.keyboard import KeyboardHandler
+from linuxwhisper.secrets import load_secrets
 from linuxwhisper.ui.tray import TrayManager
 
 
 def main() -> None:
     """Application entry point."""
+    # Load UI-managed API keys into the environment before any backend reads
+    # them (keys present in the file win; inherited env keys still apply).
+    load_secrets()
+
     print("🚀 LinuxWhisper is running.")
 
     descriptions = {
