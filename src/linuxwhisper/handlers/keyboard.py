@@ -76,6 +76,77 @@ class KeyboardHandler:
             )
         return keyboards
 
+    @staticmethod
+    def keycode_to_name(code: int) -> Optional[str]:
+        """Reverse an evdev keycode to a clean key name (e.g. 'HOME'), or None."""
+        name = ecodes.KEY.get(code)
+        if isinstance(name, (list, tuple)):
+            name = name[0]
+        return name.replace("KEY_", "") if name else None
+
+    @classmethod
+    def capture_next_key(cls, timeout: float = 6.0) -> Optional[str]:
+        """
+        Block until the next key is pressed on any keyboard and return its evdev
+        name (e.g. 'HOME', 'RIGHTALT'), or None on timeout / no device.
+
+        Used by the settings UI's "capture" button so the user can press a key
+        instead of guessing its evdev name. Devices are grabbed for the (short)
+        duration so the keypress doesn't leak to the focused app or trigger an
+        existing hotkey. Meant to run in a background thread; always ungrabs.
+        """
+        import time
+
+        devices = cls._find_keyboards()
+        if not devices:
+            return None
+
+        sel = selectors.DefaultSelector()
+        grabbed: List[InputDevice] = []
+        for dev in devices:
+            try:
+                sel.register(dev, selectors.EVENT_READ)
+            except Exception:
+                continue
+            try:
+                dev.grab()
+                grabbed.append(dev)
+            except Exception:
+                pass  # grab is best-effort; capture still works passively
+
+        deadline = time.monotonic() + timeout
+        try:
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return None
+                for key_obj, _ in sel.select(timeout=remaining):
+                    try:
+                        events = list(key_obj.fileobj.read())
+                    except Exception:
+                        continue
+                    for event in events:
+                        # First key-DOWN of a real KEY_* code wins.
+                        if event.type == ecodes.EV_KEY and event.value == 1:
+                            name = cls.keycode_to_name(event.code)
+                            if name:
+                                return name
+        finally:
+            for dev in grabbed:
+                try:
+                    dev.ungrab()
+                except Exception:
+                    pass
+            for dev in devices:
+                try:
+                    sel.unregister(dev)
+                except Exception:
+                    pass
+                try:
+                    dev.close()
+                except Exception:
+                    pass
+
     @classmethod
     def _get_mode_for_keycode(cls, keycode: int) -> Optional[str]:
         """Get mode name for a keycode, if any."""
