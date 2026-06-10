@@ -90,6 +90,7 @@ class GtkOverlay(Gtk.Window):
     def _setup_ui(self) -> None:
         """Setup drawing area and animation."""
         self.transcribing = False
+        self.live_text = ""
         self._tick = 0
         self.drawing_area = Gtk.DrawingArea()
         self.drawing_area.set_size_request(CFG.OVERLAY_WIDTH, CFG.OVERLAY_HEIGHT)
@@ -100,6 +101,11 @@ class GtkOverlay(Gtk.Window):
     def set_transcribing(self) -> None:
         """Switch the overlay to the post-recording 'transcribing' state."""
         self.transcribing = True
+        self.drawing_area.queue_draw()
+
+    def set_live_text(self, text: str) -> None:
+        """Update the live partial-transcript text shown while streaming."""
+        self.live_text = text or ""
         self.drawing_area.queue_draw()
 
     def _on_draw(self, widget: Gtk.DrawingArea, cr: cairo.Context) -> None:
@@ -115,7 +121,16 @@ class GtkOverlay(Gtk.Window):
         cr.fill()
 
         icon = "📝" if self.transcribing else self.config["icon"]
-        text = "Transcription…" if self.transcribing else self.config["text"]
+        if self.transcribing:
+            text = "Transcription…"
+        elif self.live_text:
+            # Live partials grow left-to-right; show the trailing window so the
+            # most recent words stay visible in the narrow overlay.
+            text = self.live_text[-32:]
+            if len(self.live_text) > 32:
+                text = "…" + text
+        else:
+            text = self.config["text"]
 
         # Icon
         cr.set_source_rgb(*fg_rgb)

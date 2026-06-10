@@ -35,12 +35,12 @@ def make_backend(name: str, cfg) -> Optional[TranscriptionBackend]:
         return GroqBackend(model=cfg.MODEL_WHISPER, upload_sample_rate=cfg.UPLOAD_SAMPLE_RATE)
     if name in ("whispercpp", "whisper.cpp", "local"):
         return WhisperCppBackend(model=cfg.WHISPERCPP_MODEL)
-    if name in ("openai_realtime", "openai", "deepgram"):
-        print(
-            f"⚠️ Transcription backend '{name}' (streaming) is not available yet "
-            "— relying on the fallback. (Coming in the streaming phase.)"
-        )
-        return None
+    if name in ("openai_realtime", "openai"):
+        from .openai_realtime_backend import OpenAIRealtimeBackend
+        return OpenAIRealtimeBackend(model=cfg.OPENAI_MODEL)
+    if name == "deepgram":
+        from .deepgram_backend import DeepgramBackend
+        return DeepgramBackend(model=cfg.DEEPGRAM_MODEL)
 
     print(f"⚠️ Unknown transcription backend '{name}' — ignored.")
     return None

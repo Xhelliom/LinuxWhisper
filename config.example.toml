@@ -18,9 +18,13 @@ fallback = "whispercpp"
 # Local whisper.cpp model (auto-downloads on first use): tiny, base, small,
 # medium, large-v3, large-v3-turbo, plus .en English-only variants.
 whispercpp_model = "base"
-# Models for the streaming backends (used in the streaming phase).
-# openai_model   = "gpt-4o-transcribe"
-# deepgram_model = "nova-3"
+# Streaming backends give true LIVE transcription (partial text appears in the
+# overlay while you speak). Each needs its package + an API key in the
+# environment; if unavailable, the fallback above kicks in automatically.
+#   backend = "deepgram"         + pip install -e '.[deepgram]'  + DEEPGRAM_API_KEY
+#   backend = "openai_realtime"  + pip install -e '.[openai]'    + OPENAI_API_KEY
+deepgram_model = "nova-3"
+openai_model   = "gpt-4o-transcribe"
 
 # Whisper model served by Groq (this app uses the Groq Cloud API, not a local
 # model — so values like "base.en" do NOT work here).

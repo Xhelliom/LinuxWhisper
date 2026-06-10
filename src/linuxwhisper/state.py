@@ -81,6 +81,12 @@ class AppState:
     audio_buffer: List[np.ndarray] = field(default_factory=list)
     stream: Optional[sd.InputStream] = None
     viz_queue: queue.Queue = field(default_factory=queue.Queue)
+    # Sample rate the current recording is captured at. Normally CFG.SAMPLE_RATE,
+    # but a streaming backend captures at its own wire rate (e.g. 16/24 kHz).
+    capture_rate: int = CFG.SAMPLE_RATE
+    # Active live-transcription session (StreamingSession) while a streaming
+    # backend is recording; None for the batch path.
+    stream_session: Optional[Any] = None
     # Monotonic counter bumped on each new recording; used to discard a
     # transcription whose recording was superseded before it returned.
     recording_generation: int = 0

@@ -166,7 +166,14 @@ class KeyboardHandler:
         OverlayManager.set_transcribing()
         audio_data = AudioService.stop_recording()
 
-        if audio_data is not None:
+        # Route the live session (if any) or the buffered audio, like the
+        # silence-stop path in ModeHandler.stop_recording_safe.
+        session = STATE.stream_session
+        STATE.stream_session = None
+
+        if session is not None:
+            ModeHandler.process_stream_async(STATE.current_mode, session, audio_data)
+        elif audio_data is not None:
             ModeHandler.process_audio_async(STATE.current_mode, audio_data)
         else:
             OverlayManager.hide()

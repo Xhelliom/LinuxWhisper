@@ -24,6 +24,7 @@ import numpy as np
 
 from .base import BackendUnavailable, TranscriptionBackend
 from .factory import make_backend
+from .streaming import PartialCallback, StreamingSession
 
 
 class TranscriptionDispatcher:
@@ -71,6 +72,67 @@ class TranscriptionDispatcher:
     @property
     def supports_streaming(self) -> bool:
         return bool(self.primary and self.primary.supports_streaming)
+
+    def streaming_backend(self) -> Optional[TranscriptionBackend]:
+        """The primary backend iff it can stream, else None."""
+        p = self.primary
+        return p if (p and p.supports_streaming) else None
+
+    # -- live streaming -----------------------------------------------------
+    def start_stream(
+        self, sample_rate: int, on_partial: PartialCallback
+    ) -> Optional[StreamingSession]:
+        """
+        Open a live streaming session on the primary backend, or return None if
+        the primary doesn't stream / is unavailable / fails to connect. A None
+        result means the caller should fall back to the batch path on stop.
+        """
+        backend = self.streaming_backend()
+        if backend is None:
+            return None
+        if not backend.is_available():
+            print(f"⚠️  {backend.name} streaming unavailable — will batch-fallback")
+            return None
+        try:
+            return backend.start_stream(sample_rate, self.language, on_partial)
+        except BackendUnavailable as e:
+            print(f"⚠️  {backend.name} stream start failed: {e}")
+            return None
+
+    def finish_stream(
+        self,
+        session: StreamingSession,
+        audio_fallback: Optional[np.ndarray],
+        sample_rate: int,
+    ) -> Optional[str]:
+        """
+        Finalize a streaming session and return the transcript. If streaming
+        yields nothing or fails, batch-transcribe the buffered audio via the
+        offline fallback (the buffer is kept during recording for exactly this).
+        """
+        text: Optional[str] = None
+        try:
+            text = session.finish()
+        except BackendUnavailable as e:
+            print(f"⚠️  streaming finish failed: {e}")
+        if text:
+            return text
+        if audio_fallback is not None and len(audio_fallback):
+            print("🔻 Streaming produced no text — batch fallback on buffered audio")
+            return self._batch_fallback(audio_fallback, sample_rate)
+        return None
+
+    def _batch_fallback(self, audio: np.ndarray, sample_rate: int) -> Optional[str]:
+        """Transcribe via the offline fallback only (primary is the failed stream)."""
+        fb = self.fallback
+        if fb is None or not fb.is_available():
+            print("❌ No offline fallback available for streaming failure.")
+            return None
+        try:
+            return fb.transcribe(audio, sample_rate, self.language)
+        except BackendUnavailable as e:
+            print(f"⚠️  fallback {fb.name} failed: {e}")
+            return None
 
     # -- transcription ------------------------------------------------------
     def transcribe(self, audio: np.ndarray, sample_rate: int) -> Optional[str]:

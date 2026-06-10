@@ -40,7 +40,14 @@ class ModeHandler:
         OverlayManager.set_transcribing()
         audio_data = AudioService.stop_recording()
 
-        if audio_data is not None:
+        # Hand off the live session (if any) and clear it so the next recording
+        # starts clean.
+        session = STATE.stream_session
+        STATE.stream_session = None
+
+        if session is not None:
+            ModeHandler.process_stream_async(STATE.current_mode, session, audio_data)
+        elif audio_data is not None:
             ModeHandler.process_audio_async(STATE.current_mode, audio_data)
         else:
             OverlayManager.hide()
@@ -75,6 +82,40 @@ class ModeHandler:
             GLib.idle_add(lambda: ModeHandler.process(mode, transcribed, generation))
         else:
             # Nothing to insert (too short / failed) — clear the indicator.
+            OverlayManager.hide()
+
+    @staticmethod
+    def process_stream_async(mode: str, session, audio_data: Optional[np.ndarray]) -> None:
+        """
+        Finalize a live streaming session off-thread, then process the result.
+
+        ``audio_data`` is the buffered recording, kept as the offline fallback
+        if the live stream produced nothing (handled inside the dispatcher).
+        """
+        generation = STATE.recording_generation
+        threading.Thread(
+            target=ModeHandler._stream_worker,
+            args=(mode, session, audio_data, generation),
+            daemon=True,
+        ).start()
+
+    @staticmethod
+    def _stream_worker(mode: str, session, audio_data: Optional[np.ndarray],
+                       generation: int) -> None:
+        """Worker thread: finalize the stream (with batch fallback) and process."""
+        from linuxwhisper.transcription import get_dispatcher
+
+        transcribed = None
+        try:
+            transcribed = get_dispatcher().finish_stream(
+                session, audio_data, STATE.capture_rate
+            )
+        except Exception:
+            pass
+
+        if transcribed:
+            GLib.idle_add(lambda: ModeHandler.process(mode, transcribed, generation))
+        else:
             OverlayManager.hide()
 
     @staticmethod

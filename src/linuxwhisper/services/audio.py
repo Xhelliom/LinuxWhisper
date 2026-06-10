@@ -26,7 +26,17 @@ class AudioService:
 
         data_copy = indata.copy()
 
+        # Always buffer: the batch path needs it, and it's the safety net the
+        # streaming path falls back to if the live session fails.
         STATE.audio_buffer.append(data_copy)
+
+        # Feed the live streaming session, if one is active.
+        session = STATE.stream_session
+        if session is not None:
+            try:
+                session.feed(data_copy[:, 0])
+            except Exception:
+                pass
 
         # Send downsampled data to visualization queue (skip if full)
         try:
@@ -38,11 +48,20 @@ class AudioService:
 
     @staticmethod
     def start_recording() -> None:
-        """Start audio recording stream."""
+        """Start audio recording stream (and a live session if the backend streams)."""
         STATE.audio_buffer = []
+        STATE.stream_session = None
         AudioService._clear_viz_queue()
+
+        dispatcher = get_dispatcher()
+        streaming_backend = dispatcher.streaming_backend()
+        # A streaming backend captures at its own wire rate (avoids resampling);
+        # everything else stays at the configured capture rate.
+        rate = streaming_backend.stream_sample_rate if streaming_backend else CFG.SAMPLE_RATE
+        STATE.capture_rate = rate
+
         STATE.stream = sd.InputStream(
-            samplerate=CFG.SAMPLE_RATE,
+            samplerate=rate,
             channels=1,
             dtype='float32',
             callback=AudioService.audio_callback
@@ -50,6 +69,12 @@ class AudioService:
         STATE.stream.start()
         STATE.recording = True
         STATE.recording_generation += 1
+
+        # Open the live session AFTER recording is armed so early audio is
+        # buffered (and replayable via fallback) even if the session is slow.
+        if streaming_backend is not None:
+            session = dispatcher.start_stream(rate, AudioService._on_partial)
+            STATE.stream_session = session  # None → silently uses batch fallback
 
     @staticmethod
     def stop_recording() -> Optional[np.ndarray]:
@@ -63,6 +88,13 @@ class AudioService:
         if STATE.audio_buffer:
             return np.concatenate(STATE.audio_buffer, axis=0)
         return None
+
+    @staticmethod
+    def _on_partial(text: str) -> None:
+        """Live-transcript callback from a streaming session → update overlay."""
+        # Late import to avoid a circular import at module load.
+        from linuxwhisper.managers.overlay import OverlayManager
+        OverlayManager.set_live_text(text)
 
     @staticmethod
     def _clear_viz_queue() -> None:
@@ -83,4 +115,4 @@ class AudioService:
         in the dispatcher (see ``linuxwhisper.transcription``); this stays a
         thin entry point so the recording flow is backend-agnostic.
         """
-        return get_dispatcher().transcribe(audio_data, CFG.SAMPLE_RATE)
+        return get_dispatcher().transcribe(audio_data, STATE.capture_rate)

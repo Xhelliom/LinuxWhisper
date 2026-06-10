@@ -43,6 +43,16 @@ class OverlayManager:
 
     @staticmethod
     @run_on_main_thread
+    def set_live_text(text: str) -> None:
+        """Show incremental live-transcription text on the overlay (if shown)."""
+        if STATE.overlay_window:
+            try:
+                STATE.overlay_window.set_live_text(text)
+            except Exception:
+                pass
+
+    @staticmethod
+    @run_on_main_thread
     def hide() -> None:
         """Hide overlay."""
         OverlayManager._hide_impl()

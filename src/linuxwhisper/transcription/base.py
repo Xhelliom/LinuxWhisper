@@ -18,9 +18,12 @@ Contract for ``transcribe``:
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from .streaming import PartialCallback, StreamingSession
 
 
 class BackendUnavailable(RuntimeError):
@@ -39,6 +42,9 @@ class TranscriptionBackend(ABC):
     #: True if the backend can emit partial results live during recording.
     #: Drives the overlay UX (live text vs a "transcribing…" indicator).
     supports_streaming: bool = False
+    #: sample rate (Hz) the streaming wire protocol expects — capture is opened
+    #: at this rate when this backend streams, avoiding per-chunk resampling.
+    stream_sample_rate: int = 16000
 
     @abstractmethod
     def is_available(self) -> bool:
@@ -58,6 +64,21 @@ class TranscriptionBackend(ABC):
         ISO-639-1 code or "" for autodetect. Return the transcript, ``None`` for
         no speech, or raise ``BackendUnavailable`` on operational failure.
         """
+
+    def start_stream(
+        self,
+        sample_rate: int,
+        language: str,
+        on_partial: "PartialCallback",
+    ) -> "StreamingSession":
+        """
+        Open a live streaming session (only when ``supports_streaming``).
+
+        ``on_partial(text)`` is invoked with the best-so-far transcript as it
+        arrives, for live overlay display. Raise ``BackendUnavailable`` if the
+        session cannot be established. Default: not supported.
+        """
+        raise BackendUnavailable(f"{self.name} does not support streaming")
 
     def prewarm(self) -> None:
         """
