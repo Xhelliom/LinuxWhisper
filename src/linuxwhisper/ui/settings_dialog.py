@@ -34,6 +34,35 @@ class SettingsDialog:
         ("auto",            "Auto — Groq if key, else local", False, None,            None),
     ]
 
+    # Known model ids per backend (verified against provider docs). The model
+    # combo is editable, so a custom/newer id can still be typed.
+    _MODELS = {
+        "groq":            ["whisper-large-v3-turbo", "whisper-large-v3"],
+        "whispercpp":      ["base", "tiny", "small", "medium", "large-v3",
+                            "large-v3-turbo", "base.en", "tiny.en", "small.en"],
+        "deepgram":        ["nova-3", "nova-2"],
+        "openai_realtime": ["gpt-4o-transcribe", "gpt-4o-mini-transcribe", "whisper-1"],
+    }
+    # Provider model-list links shown as a hint per backend.
+    _MODEL_DOCS = {
+        "groq":            "console.groq.com/docs/speech-to-text",
+        "deepgram":        "developers.deepgram.com/docs/models-languages-overview",
+        "openai_realtime": "platform.openai.com/docs/guides/realtime-transcription",
+        "whispercpp":      "auto-downloads on first use",
+    }
+    # Common languages offered in the combo (label, ISO-639-1 code). Editable, so
+    # any other Whisper-supported code can be typed directly.
+    _LANGUAGES = [
+        ("Autodetect", ""), ("English", "en"), ("French", "fr"), ("German", "de"),
+        ("Spanish", "es"), ("Italian", "it"), ("Portuguese", "pt"), ("Dutch", "nl"),
+        ("Russian", "ru"), ("Chinese", "zh"), ("Japanese", "ja"), ("Korean", "ko"),
+        ("Arabic", "ar"), ("Hindi", "hi"), ("Polish", "pl"),
+    ]
+
+    _whisper_status: Optional[Gtk.Label] = None
+    _hotkey_entries: Optional[dict] = None
+    _hotkey_status: Optional[Gtk.Label] = None
+
     # Live widget handles (set while the dialog is open).
     _backend_combo: Optional[Gtk.ComboBoxText] = None
     _model_entry: Optional[Gtk.Entry] = None
@@ -91,7 +120,7 @@ class SettingsDialog:
 
         scrolled = Gtk.ScrolledWindow()
         scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        scrolled.set_size_request(-1, 280)
+        scrolled.set_size_request(-1, 180)
         scrolled.set_shadow_type(Gtk.ShadowType.IN)
 
         cls._listbox = Gtk.ListBox()
@@ -108,53 +137,20 @@ class SettingsDialog:
         scrolled.add(cls._listbox)
         vbox.pack_start(scrolled, True, True, 0)
 
-        # --- Hotkeys Section ---
-        hotkey_label = Gtk.Label()
-        hotkey_label.set_halign(Gtk.Align.START)
-        hotkey_label.set_markup("<b>Hotkeys</b>")
-        vbox.pack_start(hotkey_label, False, False, 10)
-
-        hotkey_grid = Gtk.Grid()
-        hotkey_grid.set_column_spacing(15)
-        hotkey_grid.set_row_spacing(8)
-
-        hotkeys = []
-        display_names = {
-            "dictation": "Dictation:",
-            "ai": "AI Chat:",
-            "ai_rewrite": "Rewrite:",
-            "vision": "Vision:",
-            "pin": "Pin Chat:",
-            "tts": "TTS Toggle:",
-        }
-
-        for mode_id, (label, _, _) in CFG.HOTKEY_DEFS.items():
-            name = display_names.get(mode_id, mode_id.replace("_", " ").title() + ":")
-            hotkeys.append((name, label))
-
-        for i, (name, key) in enumerate(hotkeys):
-            name_label = Gtk.Label(label=name)
-            name_label.set_halign(Gtk.Align.START)
-            key_label = Gtk.Label(label=key)
-            key_label.set_halign(Gtk.Align.START)
-            key_label.get_style_context().add_class("dim-label")
-            hotkey_grid.attach(name_label, 0, i, 1, 1)
-            hotkey_grid.attach(key_label, 1, i, 1, 1)
-
-        vbox.pack_start(hotkey_grid, False, False, 0)
-
-        # Info label
-        info_label = Gtk.Label()
-        info_label.set_markup("<small><i>(Hotkeys are defined in config.py.)</i></small>")
-        info_label.set_halign(Gtk.Align.START)
-        vbox.pack_start(info_label, False, False, 10)
+        # --- Hotkeys Section (editable) ---
+        cls._build_hotkeys_section(vbox)
 
         # --- Close Button ---
         close_btn = Gtk.Button(label="Close")
         close_btn.connect("clicked", lambda w: dialog.destroy())
         vbox.pack_end(close_btn, False, False, 0)
 
-        dialog.add(vbox)
+        # Wrap everything in a scroller so the (now longer) form never overflows
+        # the fixed-size window.
+        outer = Gtk.ScrolledWindow()
+        outer.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        outer.add(vbox)
+        dialog.add(outer)
         dialog.connect("destroy", lambda w: setattr(cls, '_instance', None))
 
         return dialog
@@ -187,20 +183,35 @@ class SettingsDialog:
         cls._backend_combo.connect("changed", cls._on_backend_changed)
         grid.attach(cls._backend_combo, 1, 0, 1, 1)
 
-        # Model entry (meaning depends on the backend)
+        # Model: editable combo — pick a known id or type a custom one.
         grid.attach(cls._row_label("Model:"), 0, 1, 1, 1)
-        cls._model_entry = Gtk.Entry()
-        cls._model_entry.set_hexpand(True)
+        cls._model_entry = Gtk.ComboBoxText.new_with_entry()
+        cls._model_entry.get_child().set_hexpand(True)
         grid.attach(cls._model_entry, 1, 1, 1, 1)
 
-        # Language entry
+        # Language: editable combo — common languages + "Autodetect".
         grid.attach(cls._row_label("Language:"), 0, 2, 1, 1)
-        cls._lang_entry = Gtk.Entry()
-        cls._lang_entry.set_placeholder_text("ISO-639-1 (e.g. fr) — empty = autodetect")
-        cls._lang_entry.set_text(CFG.WHISPER_LANGUAGE)
+        cls._lang_entry = Gtk.ComboBoxText.new_with_entry()
+        for label, code in cls._LANGUAGES:
+            cls._lang_entry.append(code, f"{label}" + (f" ({code})" if code else ""))
+        # Select the row matching the current code, else put the raw code in.
+        if not cls._lang_entry.set_active_id(CFG.WHISPER_LANGUAGE):
+            cls._lang_entry.get_child().set_text(CFG.WHISPER_LANGUAGE)
         grid.attach(cls._lang_entry, 1, 2, 1, 1)
 
         vbox.pack_start(grid, False, False, 0)
+
+        # whisper.cpp availability indicator (the "is it downloaded?" check) +
+        # a download button.
+        whisper_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        cls._whisper_status = Gtk.Label()
+        cls._whisper_status.set_halign(Gtk.Align.START)
+        cls._whisper_status.set_line_wrap(True)
+        dl_btn = Gtk.Button(label="Download model")
+        dl_btn.connect("clicked", cls._on_download_whispercpp)
+        whisper_row.pack_start(cls._whisper_status, True, True, 0)
+        whisper_row.pack_start(dl_btn, False, False, 0)
+        vbox.pack_start(whisper_row, False, False, 0)
 
         # Offline fallback toggle
         cls._fallback_check = Gtk.CheckButton(label="Offline fallback (whisper.cpp) when a backend is unavailable")
@@ -234,19 +245,73 @@ class SettingsDialog:
             idx = 0
         return cls._BACKENDS[idx]
 
+    @staticmethod
+    def _combo_text(combo: Gtk.ComboBoxText) -> str:
+        """Current text of an editable ComboBoxText (typed or selected)."""
+        return combo.get_child().get_text().strip()
+
     @classmethod
     def _sync_model_entry(cls) -> None:
-        """Prefill the model field for the selected backend + update the hint."""
+        """Repopulate the model combo for the selected backend + update hints."""
         bid, label, is_stream, model_key, cfg_attr = cls._selected_backend()
+        combo = cls._model_entry
+        combo.remove_all()
         if cfg_attr is None:  # auto — model resolved at runtime
-            cls._model_entry.set_text("")
-            cls._model_entry.set_sensitive(False)
-            cls._model_entry.set_placeholder_text("(chosen automatically)")
+            combo.get_child().set_text("")
+            combo.set_sensitive(False)
+            combo.get_child().set_placeholder_text("(chosen automatically)")
         else:
-            cls._model_entry.set_sensitive(True)
-            cls._model_entry.set_text(getattr(CFG, cfg_attr))
-        hint = "🔴 live transcription" if is_stream else "📝 batch (transcribing… indicator)"
-        cls._set_trans_status(f"{hint}")
+            combo.set_sensitive(True)
+            for m in cls._MODELS.get(bid, []):
+                combo.append_text(m)
+            combo.get_child().set_text(getattr(CFG, cfg_attr))
+
+        cap = "🔴 live transcription" if is_stream else "📝 batch (transcribing… indicator)"
+        doc = cls._MODEL_DOCS.get(bid)
+        hint = cap + (f" · models: {doc}" if doc else "")
+        cls._set_trans_status(hint)
+        cls._refresh_whisper_status()
+
+    @classmethod
+    def _refresh_whisper_status(cls) -> None:
+        """Show whether local whisper.cpp is installed and the model downloaded."""
+        if cls._whisper_status is None:
+            return
+        from linuxwhisper.transcription.whispercpp_backend import WhisperCppBackend
+        model = CFG.WHISPERCPP_MODEL
+        installed, downloaded = WhisperCppBackend(model).local_status()
+        if not installed:
+            msg = "whisper.cpp: ⚪ not installed — <tt>pip install -e '.[local]'</tt>"
+        elif downloaded:
+            msg = f"whisper.cpp: ✅ model <b>{model}</b> downloaded (offline ready)"
+        else:
+            msg = f"whisper.cpp: ⬇ model <b>{model}</b> not downloaded yet"
+        cls._whisper_status.set_markup(f"<small>{msg}</small>")
+
+    @classmethod
+    def _on_download_whispercpp(cls, _btn: Gtk.Button) -> None:
+        """Download/load the local whisper.cpp model in the background."""
+        import threading
+        from linuxwhisper.transcription.whispercpp_backend import WhisperCppBackend
+        model = CFG.WHISPERCPP_MODEL
+        backend = WhisperCppBackend(model)
+        installed, _ = backend.local_status()
+        if not installed:
+            cls._whisper_status.set_markup(
+                "<small>whisper.cpp: ⚪ install the extra first — "
+                "<tt>pip install -e '.[local]'</tt></small>"
+            )
+            return
+        cls._whisper_status.set_markup(
+            f"<small>whisper.cpp: ⏳ downloading <b>{model}</b>…</small>"
+        )
+
+        def _work():
+            backend.prewarm()  # downloads + loads
+            from gi.repository import GLib
+            GLib.idle_add(cls._refresh_whisper_status)
+
+        threading.Thread(target=_work, daemon=True).start()
 
     @classmethod
     def _on_backend_changed(cls, _combo: Gtk.ComboBoxText) -> None:
@@ -261,12 +326,12 @@ class SettingsDialog:
     def _on_apply_transcription(cls, _btn: Gtk.Button) -> None:
         """Write [transcription] to config.toml and apply it live."""
         bid, label, is_stream, model_key, cfg_attr = cls._selected_backend()
-        language = cls._lang_entry.get_text().strip()
+        language = cls._resolve_language()
         fallback = "whispercpp" if cls._fallback_check.get_active() else ""
 
         values = {"backend": bid, "language": language, "fallback": fallback}
         if model_key is not None:
-            model = cls._model_entry.get_text().strip()
+            model = cls._combo_text(cls._model_entry)
             if model:
                 values[model_key] = model
 
@@ -296,7 +361,125 @@ class SettingsDialog:
             )
         else:
             cls._set_trans_status(f"✓ Applied live — backend <b>{active.name}</b>.")
+        cls._refresh_whisper_status()
         print(f"⚙️ Transcription settings applied: {values}")
+
+    @classmethod
+    def _resolve_language(cls) -> str:
+        """Map the language combo's text/selection to an ISO-639-1 code."""
+        # If a known row is selected, its id IS the code.
+        active_id = cls._lang_entry.get_active_id()
+        if active_id is not None:
+            return active_id
+        # Otherwise parse free text: accept "fr", "French", or "French (fr)".
+        text = cls._combo_text(cls._lang_entry)
+        if not text or text.lower() in ("autodetect", "auto"):
+            return ""
+        if "(" in text and text.endswith(")"):
+            return text[text.rfind("(") + 1:-1].strip()
+        for lbl, code in cls._LANGUAGES:
+            if text.lower() == lbl.lower():
+                return code
+        return text  # assume the user typed a raw code
+
+    # -----------------------------------------------------------------
+    # Hotkeys section (editable)
+    # -----------------------------------------------------------------
+    _HOTKEY_LABELS = {
+        "dictation": "Dictation", "ai": "AI Chat", "ai_rewrite": "Rewrite",
+        "vision": "Vision", "pin": "Pin Chat", "tts": "TTS Toggle",
+    }
+
+    @classmethod
+    def _build_hotkeys_section(cls, vbox: Gtk.Box) -> None:
+        """Editable per-mode key bindings (evdev key names), applied on restart."""
+        header = Gtk.Label()
+        header.set_halign(Gtk.Align.START)
+        header.set_markup("<b>Hotkeys</b>")
+        vbox.pack_start(header, False, False, 8)
+
+        grid = Gtk.Grid()
+        grid.set_column_spacing(12)
+        grid.set_row_spacing(6)
+        cls._hotkey_entries = {}
+
+        for i, (mode_id, (_label, primary, extras)) in enumerate(CFG.HOTKEY_DEFS.items()):
+            name = cls._HOTKEY_LABELS.get(mode_id, mode_id.replace("_", " ").title())
+            lbl = Gtk.Label(label=name + ":")
+            lbl.set_halign(Gtk.Align.START)
+            entry = Gtk.Entry()
+            entry.set_hexpand(True)
+            names = [cls._keycode_to_name(c) for c in [primary, *extras]]
+            entry.set_text(" ".join(n for n in names if n))
+            grid.attach(lbl, 0, i, 1, 1)
+            grid.attach(entry, 1, i, 1, 1)
+            cls._hotkey_entries[mode_id] = entry
+
+        vbox.pack_start(grid, False, False, 0)
+
+        hint = Gtk.Label()
+        hint.set_halign(Gtk.Align.START)
+        hint.set_markup(
+            "<small><i>Space-separated evdev key names (first = primary, rest = aliases), "
+            "e.g. <tt>RIGHTALT F3 F13</tt>. Applied after a service restart.</i></small>"
+        )
+        vbox.pack_start(hint, False, False, 0)
+
+        apply_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        apply_btn = Gtk.Button(label="Apply hotkeys")
+        apply_btn.connect("clicked", cls._on_apply_hotkeys)
+        apply_row.pack_start(apply_btn, False, False, 0)
+        cls._hotkey_status = Gtk.Label()
+        cls._hotkey_status.set_halign(Gtk.Align.START)
+        cls._hotkey_status.set_line_wrap(True)
+        apply_row.pack_start(cls._hotkey_status, True, True, 0)
+        vbox.pack_start(apply_row, False, False, 0)
+
+    @staticmethod
+    def _keycode_to_name(code: int) -> str:
+        """Reverse an evdev keycode to a clean key name (e.g. 'RIGHTALT')."""
+        from evdev import ecodes
+        name = ecodes.KEY.get(code)
+        if isinstance(name, (list, tuple)):
+            name = name[0]
+        return name.replace("KEY_", "") if name else str(code)
+
+    @classmethod
+    def _on_apply_hotkeys(cls, _btn: Gtk.Button) -> None:
+        """Validate every binding, then write [hotkeys] to config.toml."""
+        from linuxwhisper.config import _resolve_keycode
+
+        parsed: dict = {}
+        for mode_id, entry in cls._hotkey_entries.items():
+            raw = entry.get_text().replace(",", " ").split()
+            if not raw:
+                cls._set_hotkey_status(f"❌ {mode_id}: at least one key is required.")
+                return
+            for n in raw:  # validate now so we never write a broken binding
+                try:
+                    _resolve_keycode(n)
+                except ValueError:
+                    cls._set_hotkey_status(f"❌ unknown key '{n}' for {mode_id}.")
+                    return
+            parsed[mode_id] = [n.strip().upper().replace("KEY_", "") for n in raw]
+
+        from linuxwhisper.config_io import ConfigWriteError, update_section
+        try:
+            update_section("hotkeys", parsed)
+        except ConfigWriteError as e:
+            cls._set_hotkey_status(f"❌ {e}")
+            return
+
+        cls._set_hotkey_status(
+            "✓ Saved. Restart to apply: "
+            "<tt>systemctl --user restart app-linuxwhisper@autostart.service</tt>"
+        )
+        print(f"⌨️  Hotkeys saved: {parsed}")
+
+    @classmethod
+    def _set_hotkey_status(cls, markup: str) -> None:
+        if cls._hotkey_status:
+            cls._hotkey_status.set_markup(f"<small>{markup}</small>")
 
     @staticmethod
     def _on_voice_changed(combo: Gtk.ComboBoxText) -> None:
