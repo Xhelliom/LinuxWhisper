@@ -116,6 +116,23 @@ class Config:
     MODEL_WHISPER: str = "whisper-large-v3"
     MODEL_TTS: str = "canopylabs/orpheus-v1-english"
 
+    # --- Transcription backend selection ---
+    # Which engine transcribes speech. See linuxwhisper.transcription.
+    #   "groq"           — Groq Cloud Whisper, batch (default, needs GROQ_API_KEY)
+    #   "whispercpp"     — local whisper.cpp, offline, no key (needs [local] extra)
+    #   "openai_realtime"/"deepgram" — streaming live (added in the streaming phase)
+    #   "auto"           — Groq if a key is present, else whispercpp
+    BACKEND: str = "groq"
+    # Offline backend used automatically when the primary is unavailable
+    # (no network / no key / API error). "" disables fallback.
+    FALLBACK_BACKEND: str = "whispercpp"
+    # Local whisper.cpp model name (auto-downloads): tiny, base, small, medium,
+    # large-v3, large-v3-turbo, and .en variants.
+    WHISPERCPP_MODEL: str = "base"
+    # Streaming-backend models (used in the streaming phase).
+    OPENAI_MODEL: str = "gpt-4o-transcribe"
+    DEEPGRAM_MODEL: str = "nova-3"
+
     # --- Transcription ---
     # ISO-639-1 code (e.g. "en", "fr"). Empty string = Whisper autodetects.
     WHISPER_LANGUAGE: str = ""
@@ -253,6 +270,16 @@ def _build_config() -> Config:
     overrides: Dict[str, Any] = {}
 
     trans = data.get("transcription", {})
+    if "backend" in trans:
+        overrides["BACKEND"] = str(trans["backend"])
+    if "fallback" in trans:
+        overrides["FALLBACK_BACKEND"] = str(trans["fallback"])
+    if "whispercpp_model" in trans:
+        overrides["WHISPERCPP_MODEL"] = str(trans["whispercpp_model"])
+    if "openai_model" in trans:
+        overrides["OPENAI_MODEL"] = str(trans["openai_model"])
+    if "deepgram_model" in trans:
+        overrides["DEEPGRAM_MODEL"] = str(trans["deepgram_model"])
     if "model" in trans:
         overrides["MODEL_WHISPER"] = str(trans["model"])
     if "language" in trans:

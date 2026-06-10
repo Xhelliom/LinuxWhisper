@@ -5,6 +5,23 @@
 # or malformed file is ignored (the app still starts on defaults).
 
 [transcription]
+# Which engine transcribes speech:
+#   "groq"        — Groq Cloud Whisper, batch (default; needs GROQ_API_KEY)
+#   "whispercpp"  — local whisper.cpp, offline, no key (needs the [local] extra:
+#                   pip install -e '.[local]')
+#   "auto"        — Groq if a key is present, otherwise whispercpp
+#   "openai_realtime" / "deepgram" — streaming live (added in the streaming phase)
+backend = "groq"
+# Offline backend used AUTOMATICALLY when the primary is unavailable (no
+# network / no key / API error). Set to "" to disable the fallback.
+fallback = "whispercpp"
+# Local whisper.cpp model (auto-downloads on first use): tiny, base, small,
+# medium, large-v3, large-v3-turbo, plus .en English-only variants.
+whispercpp_model = "base"
+# Models for the streaming backends (used in the streaming phase).
+# openai_model   = "gpt-4o-transcribe"
+# deepgram_model = "nova-3"
+
 # Whisper model served by Groq (this app uses the Groq Cloud API, not a local
 # model — so values like "base.en" do NOT work here).
 #   whisper-large-v3        — most accurate

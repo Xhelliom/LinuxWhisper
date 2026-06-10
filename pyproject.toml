@@ -23,6 +23,10 @@ dependencies = [
     "pycairo",
 ]
 
+[project.optional-dependencies]
+# Local offline transcription / automatic offline fallback (whisper.cpp).
+local = ["pywhispercpp"]
+
 [project.scripts]
 linuxwhisper = "linuxwhisper.app:main"
 
