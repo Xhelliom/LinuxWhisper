@@ -207,7 +207,7 @@ class SettingsDialog:
         cls._whisper_status = Gtk.Label()
         cls._whisper_status.set_halign(Gtk.Align.START)
         cls._whisper_status.set_line_wrap(True)
-        dl_btn = Gtk.Button(label="Download model")
+        dl_btn = Gtk.Button(label="Install / download")
         dl_btn.connect("clicked", cls._on_download_whispercpp)
         whisper_row.pack_start(cls._whisper_status, True, True, 0)
         whisper_row.pack_start(dl_btn, False, False, 0)
@@ -289,29 +289,61 @@ class SettingsDialog:
         cls._whisper_status.set_markup(f"<small>{msg}</small>")
 
     @classmethod
-    def _on_download_whispercpp(cls, _btn: Gtk.Button) -> None:
-        """Download/load the local whisper.cpp model in the background."""
+    def _on_download_whispercpp(cls, btn: Gtk.Button) -> None:
+        """
+        Set up local whisper.cpp entirely from the UI: pip-install the package
+        if it's missing, then download + load the model — all in the background.
+        """
         import threading
+        btn.set_sensitive(False)
+        threading.Thread(target=cls._setup_whispercpp_worker, args=(btn,), daemon=True).start()
+
+    @classmethod
+    def _setup_whispercpp_worker(cls, btn: Gtk.Button) -> None:
+        import importlib
+        import subprocess
+        import sys
+        from gi.repository import GLib
+
         from linuxwhisper.transcription.whispercpp_backend import WhisperCppBackend
+
+        def status(markup: str) -> None:
+            GLib.idle_add(lambda: cls._whisper_status.set_markup(f"<small>{markup}</small>"))
+
         model = CFG.WHISPERCPP_MODEL
         backend = WhisperCppBackend(model)
-        installed, _ = backend.local_status()
-        if not installed:
-            cls._whisper_status.set_markup(
-                "<small>whisper.cpp: ⚪ install the extra first — "
-                "<tt>pip install -e '.[local]'</tt></small>"
-            )
+
+        # 1) install pywhispercpp if absent
+        if not backend.is_available():
+            status("whisper.cpp: ⏳ installing pywhispercpp…")
+            try:
+                proc = subprocess.run(
+                    [sys.executable, "-m", "pip", "install", "pywhispercpp"],
+                    capture_output=True, text=True, timeout=900,
+                )
+            except Exception as e:
+                status(f"whisper.cpp: ❌ install failed: {e}")
+                GLib.idle_add(lambda: btn.set_sensitive(True))
+                return
+            importlib.invalidate_caches()
+            if proc.returncode != 0 or not backend.is_available():
+                tail = (proc.stderr or proc.stdout or "").strip().splitlines()
+                why = tail[-1] if tail else "see logs"
+                status(f"whisper.cpp: ❌ install failed — {why}")
+                GLib.idle_add(lambda: btn.set_sensitive(True))
+                return
+
+        # 2) download + load the model
+        status(f"whisper.cpp: ⏳ downloading model <b>{model}</b>…")
+        try:
+            backend.prewarm()
+        except Exception as e:
+            status(f"whisper.cpp: ❌ download failed: {e}")
+            GLib.idle_add(lambda: btn.set_sensitive(True))
             return
-        cls._whisper_status.set_markup(
-            f"<small>whisper.cpp: ⏳ downloading <b>{model}</b>…</small>"
-        )
 
-        def _work():
-            backend.prewarm()  # downloads + loads
-            from gi.repository import GLib
-            GLib.idle_add(cls._refresh_whisper_status)
-
-        threading.Thread(target=_work, daemon=True).start()
+        GLib.idle_add(cls._refresh_whisper_status)
+        GLib.idle_add(lambda: btn.set_sensitive(True))
 
     @classmethod
     def _on_backend_changed(cls, _combo: Gtk.ComboBoxText) -> None:

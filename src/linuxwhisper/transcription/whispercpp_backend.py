@@ -16,6 +16,7 @@ the dispatcher calls in the background at startup.
 """
 from __future__ import annotations
 
+import re
 import threading
 from pathlib import Path
 from typing import Optional, Tuple
@@ -24,6 +25,11 @@ import numpy as np
 
 from .base import BackendUnavailable, TranscriptionBackend
 from .util import to_mono_16k
+
+# whisper.cpp emits non-speech markers on silence/noise, e.g. "[BLANK_AUDIO]",
+# "[ Silence ]", "(music)". Drop segments that are entirely such a marker so we
+# never type them as dictated text.
+_NON_SPEECH = re.compile(r"^\s*[\[(].*?[\])]\s*$")
 
 
 class WhisperCppBackend(TranscriptionBackend):
@@ -105,5 +111,10 @@ class WhisperCppBackend(TranscriptionBackend):
         except Exception as e:
             raise BackendUnavailable(f"whisper.cpp transcription failed: {e}") from e
 
-        text = " ".join(seg.text.strip() for seg in segments).strip()
+        parts = []
+        for seg in segments:
+            t = seg.text.strip()
+            if t and not _NON_SPEECH.match(t):
+                parts.append(t)
+        text = " ".join(parts).strip()
         return text or None
