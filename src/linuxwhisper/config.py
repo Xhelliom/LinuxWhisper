@@ -326,3 +326,18 @@ def _build_config() -> Config:
 
 # Global config instance
 CFG = _build_config()
+
+
+def reload_config() -> Config:
+    """
+    Re-read config.toml and rebuild the global ``CFG`` (used by the settings UI
+    to apply edits live).
+
+    Note: modules that did ``from linuxwhisper.config import CFG`` keep their old
+    reference, so settings that are only read at import/startup (overlay size,
+    hotkeys) still need a service restart. Transcription settings DO apply live
+    because the dispatcher is reconfigured from the returned fresh config.
+    """
+    global CFG
+    CFG = _build_config()
+    return CFG

@@ -21,6 +21,7 @@ dependencies = [
     "evdev",
     "pygobject",
     "pycairo",
+    "tomlkit",
 ]
 
 [project.optional-dependencies]
