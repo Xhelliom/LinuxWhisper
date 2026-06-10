@@ -13,7 +13,9 @@ from linuxwhisper.state import STATE, SettingsManager
 
 import gi
 gi.require_version('Gtk', '3.0')
-from gi.repository import Gtk
+gi.require_version('Pango', '1.0')
+gi.require_version('PangoCairo', '1.0')
+from gi.repository import GLib, Gtk, Pango, PangoCairo
 
 
 class SettingsDialog:
@@ -21,6 +23,9 @@ class SettingsDialog:
 
     _instance: Optional[Gtk.Window] = None
     _listbox: Optional[Gtk.ListBox] = None
+    _preview_area: Optional[Gtk.DrawingArea] = None
+    _preview_tick: int = 0
+    _preview_timer = None
 
     # Transcription backends offered in the UI:
     #   (id, label, is_streaming, model config-key, CFG attr holding the model)
@@ -97,22 +102,92 @@ class SettingsDialog:
 
     @classmethod
     def _create_dialog(cls) -> Gtk.Window:
-        """Create the settings dialog window."""
+        """Create the settings dialog window (tabbed)."""
         dialog = Gtk.Window(title="LinuxWhisper Settings")
-        dialog.set_default_size(420, 760)
+        dialog.set_default_size(470, 640)
         dialog.set_resizable(False)
         dialog.set_position(Gtk.WindowPosition.CENTER)
         dialog.set_keep_above(True)
 
-        # Main container
-        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=15)
-        vbox.set_margin_top(20)
-        vbox.set_margin_bottom(20)
-        vbox.set_margin_start(20)
-        vbox.set_margin_end(20)
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        for m in ("top", "bottom", "start", "end"):
+            getattr(root, f"set_margin_{m}")(12)
 
-        # --- Voice Section ---
-        voice_label = Gtk.Label(label="TTS Voice")
+        # Group the (now numerous) settings into tabs instead of one long scroll.
+        notebook = Gtk.Notebook()
+        notebook.set_scrollable(True)
+
+        trans = cls._page()
+        cls._build_transcription_section(trans)
+        cls._build_postprocess_section(trans)
+        notebook.append_page(cls._scroll(trans), Gtk.Label(label="Transcription"))
+
+        keys = cls._page()
+        cls._build_api_keys_section(keys)
+        notebook.append_page(cls._scroll(keys), Gtk.Label(label="API Keys"))
+
+        hotkeys = cls._page()
+        cls._build_hotkeys_section(hotkeys)
+        notebook.append_page(cls._scroll(hotkeys), Gtk.Label(label="Hotkeys"))
+
+        appearance = cls._page()
+        cls._build_appearance_page(appearance)
+        notebook.append_page(cls._scroll(appearance), Gtk.Label(label="Appearance"))
+
+        root.pack_start(notebook, True, True, 0)
+
+        close_btn = Gtk.Button(label="Close")
+        close_btn.connect("clicked", lambda w: dialog.destroy())
+        root.pack_end(close_btn, False, False, 0)
+
+        dialog.add(root)
+        dialog.connect("destroy", cls._on_destroy)
+        return dialog
+
+    @classmethod
+    def _on_destroy(cls, _w: Gtk.Widget) -> None:
+        cls._instance = None
+        if cls._preview_timer is not None:
+            try:
+                GLib.source_remove(cls._preview_timer)
+            except Exception:
+                pass
+            cls._preview_timer = None
+        cls._preview_area = None
+
+    @classmethod
+    def _tick_preview(cls) -> bool:
+        """Drive the looping animation of the overlay preview."""
+        if cls._instance is None or cls._preview_area is None:
+            cls._preview_timer = None
+            return False
+        cls._preview_tick += 1
+        cls._preview_area.queue_draw()
+        return True
+
+    @staticmethod
+    def _page() -> Gtk.Box:
+        """A padded vertical box used as a notebook tab body."""
+        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        for m in ("top", "bottom", "start", "end"):
+            getattr(vbox, f"set_margin_{m}")(14)
+        return vbox
+
+    @staticmethod
+    def _scroll(child: Gtk.Widget) -> Gtk.ScrolledWindow:
+        """Wrap a tab body so it scrolls if it ever exceeds the window height."""
+        sw = Gtk.ScrolledWindow()
+        sw.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        sw.add(child)
+        return sw
+
+    # -----------------------------------------------------------------
+    # Appearance tab: TTS voice + colour scheme gallery + overlay preview
+    # -----------------------------------------------------------------
+    @classmethod
+    def _build_appearance_page(cls, vbox: Gtk.Box) -> None:
+        # TTS voice
+        voice_label = Gtk.Label()
         voice_label.set_halign(Gtk.Align.START)
         voice_label.set_markup("<b>TTS Voice</b>")
         vbox.pack_start(voice_label, False, False, 0)
@@ -124,57 +199,65 @@ class SettingsDialog:
         voice_combo.connect("changed", cls._on_voice_changed)
         vbox.pack_start(voice_combo, False, False, 0)
 
-        # --- Transcription Section ---
-        cls._build_transcription_section(vbox)
-
-        # --- Post-processing Section ---
-        cls._build_postprocess_section(vbox)
-
-        # --- API Keys Section ---
-        cls._build_api_keys_section(vbox)
-
-        # --- Color Scheme Gallery ---
+        # Colour scheme gallery
         scheme_label = Gtk.Label()
         scheme_label.set_halign(Gtk.Align.START)
-        scheme_label.set_markup("<b>Color Scheme Gallery</b>")
+        scheme_label.set_markup("<b>Color Scheme</b>")
         vbox.pack_start(scheme_label, False, False, 0)
+
+        # Live overlay preview so the theme can be judged on the actual bubble.
+        cls._preview_area = Gtk.DrawingArea()
+        cls._preview_area.set_size_request(-1, 74)
+        cls._preview_area.connect("draw", cls._draw_overlay_preview)
+        vbox.pack_start(cls._preview_area, False, False, 0)
+        # Loop a gentle animation so the preview shows the live effects.
+        if cls._preview_timer is None:
+            cls._preview_timer = GLib.timeout_add(40, cls._tick_preview)
 
         scrolled = Gtk.ScrolledWindow()
         scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        scrolled.set_size_request(-1, 180)
+        scrolled.set_size_request(-1, 210)
         scrolled.set_shadow_type(Gtk.ShadowType.IN)
 
         cls._listbox = Gtk.ListBox()
         cls._listbox.set_selection_mode(Gtk.SelectionMode.SINGLE)
         cls._listbox.connect("row-activated", cls._on_scheme_selected)
-
-        schemes = list(CFG.COLOR_SCHEMES.keys())
-        for name in schemes:
+        for name in CFG.COLOR_SCHEMES.keys():
             row = cls._create_theme_row(name)
             cls._listbox.add(row)
             if name == STATE.color_scheme:
                 cls._listbox.select_row(row)
-
         scrolled.add(cls._listbox)
         vbox.pack_start(scrolled, True, True, 0)
 
-        # --- Hotkeys Section (editable) ---
-        cls._build_hotkeys_section(vbox)
+    @classmethod
+    def _draw_overlay_preview(cls, widget: Gtk.DrawingArea, cr) -> bool:
+        """
+        Preview the recording overlay using the SAME renderer as the real bubble
+        (GtkOverlay.render_content), so the preview matches exactly.
+        """
+        from linuxwhisper.ui.recording_overlay import GtkOverlay
 
-        # --- Close Button ---
-        close_btn = Gtk.Button(label="Close")
-        close_btn.connect("clicked", lambda w: dialog.destroy())
-        vbox.pack_end(close_btn, False, False, 0)
+        scheme = CFG.COLOR_SCHEMES.get(STATE.color_scheme, CFG.COLOR_SCHEMES[CFG.DEFAULT_SCHEME])
+        bw, bh = CFG.OVERLAY_WIDTH, CFG.OVERLAY_HEIGHT
+        aw, ah = widget.get_allocated_width(), widget.get_allocated_height()
 
-        # Wrap everything in a scroller so the (now longer) form never overflows
-        # the fixed-size window.
-        outer = Gtk.ScrolledWindow()
-        outer.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        outer.add(vbox)
-        dialog.add(outer)
-        dialog.connect("destroy", lambda w: setattr(cls, '_instance', None))
+        # Looping, calm waveform like the overlay's idle/recording motion.
+        t = cls._preview_tick
+        bars = [0.12 + 0.62 * (0.5 + 0.5 * math.sin(t * 0.13 + i * 0.5))
+                for i in range(GtkOverlay.NUM_BARS)]
 
-        return dialog
+        # Desktop UI font (portable), same as the overlay.
+        settings = Gtk.Settings.get_default()
+        fontname = (settings.get_property("gtk-font-name") if settings else None) or "Sans 10"
+        family = Pango.FontDescription(fontname).get_family() or "Sans"
+
+        cr.translate((aw - bw) / 2, max(0, (ah - bh) / 2))  # center the bubble
+        GtkOverlay.render_content(
+            cr, bw, bh, scheme=scheme, mode="dictation", text="Listening…",
+            bars=bars, tick=t, font_family=family, transcribing=False, a=1.0,
+        )
+        return True
 
     # -----------------------------------------------------------------
     # Transcription section (#15)
@@ -842,8 +925,8 @@ class SettingsDialog:
         print(f"🎙️ Voice changed to: {voice}")
         SettingsManager.save(STATE)
 
-    @staticmethod
-    def _on_scheme_selected(listbox: Gtk.ListBox, row: Gtk.ListBoxRow) -> None:
+    @classmethod
+    def _on_scheme_selected(cls, listbox: Gtk.ListBox, row: Gtk.ListBoxRow) -> None:
         """Handle theme gallery selection."""
         if not row:
             return
@@ -863,6 +946,9 @@ class SettingsDialog:
             STATE.color_scheme = name
             print(f"🎨 Color scheme changed to: {name}")
             SettingsManager.save(STATE)
+            # Refresh the overlay preview to reflect the new theme.
+            if cls._preview_area:
+                cls._preview_area.queue_draw()
             # Late import to avoid circular dependency
             from linuxwhisper.managers.chat import ChatManager
             ChatManager.refresh_overlay()
