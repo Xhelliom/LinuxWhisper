@@ -37,23 +37,36 @@ class KeyboardHandler:
         for extra in extras:
             _KEY_TO_MODE[extra] = mode_id
 
+    @staticmethod
+    def _is_keyboard(dev: InputDevice) -> bool:
+        """Heuristic: a device with EV_KEY exposing typical keyboard keys."""
+        try:
+            caps = dev.capabilities()
+        except Exception:
+            return False
+        if ecodes.EV_KEY not in caps:
+            return False
+        key_caps = caps[ecodes.EV_KEY]
+        # Require some function/letter keys to filter out mice, lid switches, etc.
+        return ecodes.KEY_F1 in key_caps or ecodes.KEY_A in key_caps
+
     @classmethod
     def _find_keyboards(cls) -> List[InputDevice]:
-        """Discover all keyboard input devices."""
+        """Discover all keyboard input devices (opens a fresh handle each)."""
         keyboards = []
         for path in evdev.list_devices():
             try:
                 dev = InputDevice(path)
-                caps = dev.capabilities()
-                # A device with EV_KEY that has typical keyboard keys
-                if ecodes.EV_KEY in caps:
-                    key_caps = caps[ecodes.EV_KEY]
-                    # Check for at least some function keys to filter out mice etc.
-                    if ecodes.KEY_F1 in key_caps or ecodes.KEY_A in key_caps:
-                        keyboards.append(dev)
-                        logger.debug("Found keyboard: %s (%s)", dev.name, dev.path)
             except Exception:
                 continue
+            if cls._is_keyboard(dev):
+                keyboards.append(dev)
+                logger.debug("Found keyboard: %s (%s)", dev.name, dev.path)
+            else:
+                try:
+                    dev.close()
+                except Exception:
+                    pass
 
         if not keyboards:
             logger.warning(
@@ -142,54 +155,137 @@ class KeyboardHandler:
 
     @classmethod
     def _stop_and_process(cls) -> None:
-        """Stop recording, transcribe, and process result."""
+        """
+        Stop recording and hand transcription off-thread.
+
+        Runs on the keyboard listener thread, so it must not block on the
+        network or touch GTK directly: the overlay hide is already marshalled
+        to the main loop, stop_recording() is not a GTK call, and
+        transcription + processing run in a worker thread.
+        """
         OverlayManager.hide()
         audio_data = AudioService.stop_recording()
 
         if audio_data is not None:
-            transcribed = AudioService.transcribe(audio_data)
-            if transcribed:
-                ModeHandler.process(STATE.current_mode, transcribed)
+            ModeHandler.process_audio_async(STATE.current_mode, audio_data)
+
+    # Re-scan interval (seconds) to pick up keyboards that (re)appear, e.g.
+    # after resume from suspend or USB hotplug.
+    _RESCAN_INTERVAL_SEC: float = 3.0
+    _stop: bool = False
+
+    @classmethod
+    def stop(cls) -> None:
+        """Request the listener loop to exit (the daemon thread will end)."""
+        cls._stop = True
+
+    @classmethod
+    def _sync_devices(
+        cls,
+        sel: "selectors.BaseSelector",
+        registered: Dict[str, InputDevice],
+    ) -> None:
+        """
+        Register any keyboards not already tracked.
+
+        Compares by device path so existing handles are never reopened
+        (avoids fd leaks). Vanished devices are pruned lazily on read
+        failure in the main loop, since list_devices() may briefly omit a
+        device that is still readable.
+        """
+        for path in evdev.list_devices():
+            if path in registered:
+                continue
+            try:
+                dev = InputDevice(path)
+            except Exception:
+                continue
+            if not cls._is_keyboard(dev):
+                try:
+                    dev.close()
+                except Exception:
+                    pass
+                continue
+            try:
+                sel.register(dev, selectors.EVENT_READ)
+                registered[path] = dev
+                logger.info("Registered keyboard: %s (%s)", dev.name, path)
+            except Exception:
+                try:
+                    dev.close()
+                except Exception:
+                    pass
+
+    @classmethod
+    def _drop_device(
+        cls,
+        sel: "selectors.BaseSelector",
+        registered: Dict[str, InputDevice],
+        device: InputDevice,
+    ) -> None:
+        """Unregister, close and forget a disconnected device."""
+        logger.warning("Device disconnected: %s", device.path)
+        try:
+            sel.unregister(device)
+        except Exception:
+            pass
+        registered.pop(device.path, None)
+        try:
+            device.close()
+        except Exception:
+            pass
 
     @classmethod
     def run(cls) -> None:
         """
         Start the evdev keyboard listener (blocking).
 
-        Monitors all keyboard devices using a selector for efficient I/O.
-        Runs in a background thread — started from app.py.
+        Monitors all keyboard devices using a selector. Survives device
+        disconnects (suspend/resume, hotplug): it never exits on its own,
+        and re-scans every ``_RESCAN_INTERVAL_SEC`` to (re)register
+        keyboards as they come back. Runs in a background daemon thread —
+        started from app.py.
         """
-        keyboards = cls._find_keyboards()
-        if not keyboards:
-            print(
-                "❌ No keyboard devices accessible.\n"
-                "   Run: sudo usermod -aG input $USER\n"
-                "   Then log out and back in."
-            )
-            return
+        import time
 
-        print(f"⌨️  Listening on {len(keyboards)} keyboard device(s)")
-
+        cls._stop = False
         sel = selectors.DefaultSelector()
-        for dev in keyboards:
-            sel.register(dev, selectors.EVENT_READ)
+        registered: Dict[str, InputDevice] = {}
 
+        cls._sync_devices(sel, registered)
+        if registered:
+            print(f"⌨️  Listening on {len(registered)} keyboard device(s)")
+        else:
+            print(
+                "⏳ No keyboard accessible yet — will keep scanning.\n"
+                "   If this persists: sudo usermod -aG input $USER (then re-login)."
+            )
+
+        last_scan = time.monotonic()
         try:
-            while True:
-                for key, _ in sel.select():
+            while not cls._stop:
+                for key, _ in sel.select(timeout=cls._RESCAN_INTERVAL_SEC):
                     device = key.fileobj
                     try:
                         for event in device.read():
                             if event.type == ecodes.EV_KEY:
                                 cls._handle_key_event(event)
                     except OSError:
-                        # Device disconnected — unregister and continue
-                        logger.warning("Device disconnected: %s", device.path)
-                        sel.unregister(device)
-                        if not sel.get_map():
-                            logger.error("All keyboard devices disconnected!")
-                            break
+                        # Device disconnected — drop it and keep going. It will
+                        # be re-registered by the periodic re-scan when it
+                        # reappears (new event number after resume).
+                        cls._drop_device(sel, registered, device)
+
+                now = time.monotonic()
+                if now - last_scan >= cls._RESCAN_INTERVAL_SEC:
+                    cls._sync_devices(sel, registered)
+                    last_scan = now
         except Exception as e:
             logger.error("Keyboard listener error: %s", e)
         finally:
+            for dev in list(registered.values()):
+                try:
+                    dev.close()
+                except Exception:
+                    pass
             sel.close()

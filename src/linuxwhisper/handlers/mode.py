@@ -39,12 +39,22 @@ class ModeHandler:
         audio_data = AudioService.stop_recording()
 
         if audio_data is not None:
-            # Process in background
-            threading.Thread(
-                target=ModeHandler._process_worker,
-                args=(STATE.current_mode, audio_data),
-                daemon=True
-            ).start()
+            ModeHandler.process_audio_async(STATE.current_mode, audio_data)
+
+    @staticmethod
+    def process_audio_async(mode: str, audio_data: np.ndarray) -> None:
+        """
+        Transcribe and process audio off the calling thread.
+
+        Safe to call from any thread (e.g. the keyboard listener): the
+        blocking Groq call runs in a worker thread and all UI work is
+        marshalled back to the GTK main loop via GLib.idle_add.
+        """
+        threading.Thread(
+            target=ModeHandler._process_worker,
+            args=(mode, audio_data),
+            daemon=True,
+        ).start()
 
     @staticmethod
     def _process_worker(mode: str, audio_data: np.ndarray) -> None:
