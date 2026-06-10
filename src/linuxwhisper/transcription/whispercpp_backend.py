@@ -17,7 +17,8 @@ the dispatcher calls in the background at startup.
 from __future__ import annotations
 
 import threading
-from typing import Optional
+from pathlib import Path
+from typing import Optional, Tuple
 
 import numpy as np
 
@@ -43,6 +44,25 @@ class WhisperCppBackend(TranscriptionBackend):
         except ImportError:
             return False
         return True
+
+    def _models_dir(self) -> Path:
+        """Directory pywhispercpp stores downloaded ggml models in."""
+        try:
+            from pywhispercpp.constants import MODELS_DIR
+            return Path(MODELS_DIR)
+        except Exception:
+            return Path.home() / ".local" / "share" / "pywhispercpp" / "models"
+
+    def is_model_downloaded(self) -> bool:
+        """True if the configured model's ggml file is already on disk."""
+        if self._model is not None:  # loaded → definitely present
+            return True
+        d = self._models_dir()
+        return d.exists() and any(d.glob(f"ggml-{self._model_name}*.bin"))
+
+    def local_status(self) -> Tuple[bool, bool]:
+        """(pywhispercpp_installed, model_downloaded) — for the settings UI."""
+        return self.is_available(), self.is_model_downloaded()
 
     def _get_model(self):
         """Load the whisper.cpp model once (thread-safe, double-checked)."""
