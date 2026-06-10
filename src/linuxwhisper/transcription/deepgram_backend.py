@@ -55,9 +55,11 @@ class DeepgramSession(StreamingSession):
                 "sample_rate": sample_rate,
                 "interim_results": True,
                 "punctuate": True,
+                # Without a language, Deepgram defaults to English and will
+                # mis-transcribe other languages — use multilingual autodetect
+                # (nova-3) so e.g. French stays French. A forced language wins.
+                "language": language or "multi",
             }
-            if language:
-                opts["language"] = language
 
             with client.listen.v1.connect(**opts) as conn:
                 conn.on(EventType.MESSAGE, self._on_message)

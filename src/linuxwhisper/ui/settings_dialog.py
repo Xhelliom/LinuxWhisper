@@ -387,20 +387,99 @@ class SettingsDialog:
         fresh = config_module.reload_config()
         reconfigure_dispatcher(fresh)
 
-        # 3) report — warn if the chosen backend can't actually serve right now
+        # 3) report — and auto-install a missing streaming package if that's why.
+        cls._report_backend_availability(bid)
+        cls._refresh_whisper_status()
+        print(f"⚙️ Transcription settings applied: {values}")
+
+    # backend id -> (import module, pip package, env key, human name)
+    _BACKEND_PKG = {
+        "deepgram":        ("deepgram", "deepgram-sdk", "DEEPGRAM_API_KEY", "Deepgram"),
+        "openai_realtime": ("openai",   "openai",       "OPENAI_API_KEY",   "OpenAI"),
+    }
+
+    @staticmethod
+    def _module_installed(module: str) -> bool:
+        import importlib.util
+        return importlib.util.find_spec(module) is not None
+
+    @classmethod
+    def _report_backend_availability(cls, bid: str) -> None:
+        """Status after Apply; auto-install a missing streaming package."""
+        from linuxwhisper.transcription import get_dispatcher
         active = get_dispatcher().active
         if active is None:
             cls._set_trans_status("⚠️ Saved. No usable backend — fallback will be used.")
-        elif not active.is_available():
-            need = "API key / package"
-            cls._set_trans_status(
-                f"⚠️ Saved & applied, but <b>{active.name}</b> is unavailable "
-                f"({need} missing) → offline fallback will be used."
-            )
-        else:
+            return
+        if active.is_available():
             cls._set_trans_status(f"✓ Applied live — backend <b>{active.name}</b>.")
-        cls._refresh_whisper_status()
-        print(f"⚙️ Transcription settings applied: {values}")
+            return
+
+        info = cls._BACKEND_PKG.get(bid)
+        if info:
+            module, pip_name, env_key, human = info
+            if not cls._module_installed(module):
+                cls._install_backend_pkg_async(bid, pip_name, human)
+                return
+            import os
+            if not os.environ.get(env_key):
+                cls._set_trans_status(
+                    f"⚠️ {human} needs its API key — set <b>{env_key}</b> in "
+                    "“API Keys” below, then Apply. (Offline fallback used meanwhile.)"
+                )
+                return
+        if bid in ("whispercpp", "auto"):
+            cls._set_trans_status(
+                "⚠️ Saved. whisper.cpp isn’t ready — use “Install / download” above."
+            )
+            return
+        cls._set_trans_status(
+            f"⚠️ Saved, but <b>{active.name}</b> is unavailable — fallback will be used."
+        )
+
+    @classmethod
+    def _install_backend_pkg_async(cls, bid: str, pip_name: str, human: str) -> None:
+        """pip-install a streaming backend's package, then re-apply."""
+        import threading
+        cls._set_trans_status(f"⏳ Installing {human} ({pip_name})…")
+
+        def work():
+            from gi.repository import GLib
+            ok, msg = cls._pip_install(pip_name)
+
+            def done():
+                if not ok:
+                    cls._set_trans_status(f"❌ {human} install failed — {msg}")
+                    return False
+                # Rebuild backends now that the package exists, then re-report.
+                from linuxwhisper import config as config_module
+                from linuxwhisper.transcription import reconfigure_dispatcher
+                reconfigure_dispatcher(config_module.reload_config())
+                cls._report_backend_availability(bid)
+                return False
+
+            GLib.idle_add(done)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    @staticmethod
+    def _pip_install(pip_name: str):
+        """Run pip install in-process venv. Returns (ok, last_output_line)."""
+        import importlib
+        import subprocess
+        import sys
+        try:
+            proc = subprocess.run(
+                [sys.executable, "-m", "pip", "install", pip_name],
+                capture_output=True, text=True, timeout=900,
+            )
+        except Exception as e:
+            return False, str(e)
+        importlib.invalidate_caches()
+        if proc.returncode != 0:
+            tail = (proc.stderr or proc.stdout or "").strip().splitlines()
+            return False, (tail[-1] if tail else "see logs")
+        return True, "ok"
 
     @classmethod
     def _resolve_language(cls) -> str:

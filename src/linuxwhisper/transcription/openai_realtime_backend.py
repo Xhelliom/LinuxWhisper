@@ -71,10 +71,17 @@ class OpenAIRealtimeSession(StreamingSession):
         try:
             async with client.realtime.connect(model=self._model) as conn:
                 self._conn = conn
+                # GA Realtime transcription-session shape (openai>=2): audio
+                # config is nested under audio.input; format is 24 kHz PCM.
                 await conn.session.update(session={
-                    "input_audio_format": "pcm16",
-                    "input_audio_transcription": transcription,
-                    "turn_detection": None,  # push-to-talk: we commit manually
+                    "type": "transcription",
+                    "audio": {
+                        "input": {
+                            "format": {"type": "audio/pcm", "rate": 24000},
+                            "transcription": transcription,
+                            "turn_detection": None,  # push-to-talk: commit manually
+                        }
+                    },
                 })
                 self._ready.set()
                 async for event in conn:

@@ -28,8 +28,8 @@ dependencies = [
 # Local offline transcription / automatic offline fallback (whisper.cpp).
 local = ["pywhispercpp"]
 # Streaming live transcription backends.
-openai = ["openai>=1.68"]
-deepgram = ["deepgram-sdk>=5"]
+openai = ["openai>=2"]
+deepgram = ["deepgram-sdk>=7"]
 
 [project.scripts]
 linuxwhisper = "linuxwhisper.app:main"
