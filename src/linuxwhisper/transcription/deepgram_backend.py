@@ -64,11 +64,18 @@ class DeepgramSession(StreamingSession):
             with client.listen.v1.connect(**opts) as conn:
                 conn.on(EventType.MESSAGE, self._on_message)
                 conn.on(EventType.ERROR, self._on_error)
-                conn.start_listening()
+                # start_listening() BLOCKS — it runs the receive loop. Run it in
+                # its own thread so we can send audio concurrently; otherwise no
+                # audio is ever sent and Deepgram closes with a 1011 timeout.
+                listener = threading.Thread(target=conn.start_listening, daemon=True)
+                listener.start()
                 while True:
                     item = self._queue.get()
                     if item is _FINISH:
                         try:
+                            # Flush any buffered audio into a final result, then
+                            # signal end-of-stream.
+                            conn.send_finalize()
                             conn.send_close_stream()
                         except Exception:
                             pass
@@ -78,6 +85,8 @@ class DeepgramSession(StreamingSession):
                     except Exception as e:
                         self._error = e
                         break
+                # Let final transcripts arrive before the context closes the socket.
+                listener.join(timeout=4.0)
         except Exception as e:
             self._error = e
         finally:
