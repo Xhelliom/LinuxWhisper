@@ -83,8 +83,10 @@ class AudioService:
         wav_write(wav_buffer, CFG.SAMPLE_RATE, audio_data)
         wav_buffer.seek(0)
 
-        transcript = GROQ_CLIENT.audio.transcriptions.create(
-            model=CFG.MODEL_WHISPER,
-            file=wav_buffer
-        )
+        # Pass language only when configured; empty string = autodetect.
+        params: dict = {"model": CFG.MODEL_WHISPER, "file": wav_buffer}
+        if CFG.WHISPER_LANGUAGE:
+            params["language"] = CFG.WHISPER_LANGUAGE
+
+        transcript = GROQ_CLIENT.audio.transcriptions.create(**params)
         return transcript.text.strip()

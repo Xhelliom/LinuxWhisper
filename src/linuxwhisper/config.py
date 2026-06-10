@@ -1,17 +1,26 @@
 """
-Immutable application configuration.
+Application configuration.
 
-All constants are centralized here for easy modification.
-To change a setting, edit the default value below.
+Defaults are defined in the ``Config`` dataclass below. They can be
+overridden at runtime by an optional user file:
+
+    ~/.config/linuxwhisper/config.toml
+
+The TOML is loaded once at import time and layered on top of the defaults
+(see ``_build_config``). A missing or malformed file falls back to defaults,
+so the app always starts.
 """
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+import tomllib
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 from evdev import ecodes
+
+CONFIG_FILE: Path = Path.home() / ".config" / "linuxwhisper" / "config.toml"
 
 
 @dataclass(frozen=True)
@@ -19,8 +28,9 @@ class Config:
     """
     Immutable application configuration.
 
-    All constants are centralized here for easy modification.
-    To change a setting, edit the default value below.
+    Defaults live here; user overrides come from config.toml (see module
+    docstring). To change a setting permanently without editing source,
+    edit config.toml.
     """
     # --- Global Design System (Curated Color Schemes) ---
     COLOR_SCHEMES: Dict[str, Dict[str, str]] = field(default_factory=lambda: {
@@ -106,10 +116,18 @@ class Config:
     MODEL_WHISPER: str = "whisper-large-v3"
     MODEL_TTS: str = "canopylabs/orpheus-v1-english"
 
+    # --- Transcription ---
+    # ISO-639-1 code (e.g. "en", "fr"). Empty string = Whisper autodetects.
+    WHISPER_LANGUAGE: str = ""
+
     # --- TTS Voices ---
     TTS_VOICES: Tuple[str, ...] = ("diana", "hannah", "autumn", "austin", "daniel", "troy")
     TTS_DEFAULT_VOICE: str = "diana"
     TTS_MAX_CHARS: int = 4000
+
+    # --- Recording Overlay Geometry ---
+    OVERLAY_WIDTH: int = 220
+    OVERLAY_HEIGHT: int = 60
 
     # --- Temp File Paths ---
     TEMP_SCREEN_PATH: str = f"/tmp/temp_screen_{os.getuid()}.png"
@@ -134,6 +152,8 @@ class Config:
     # --- Hotkey Definitions ---
     # format: "id": (Label, PrimaryKeycode, [ExtraKeycodes])
     # Uses evdev ecodes — works on both X11 and Wayland.
+    # Override per-mode in config.toml under [hotkeys] using key names, e.g.
+    #   dictation = ["RIGHTALT", "F3", "F13"]
     HOTKEY_DEFS: Dict[str, Tuple[str, int, List[int]]] = field(default_factory=lambda: {
         "dictation":  ("R-Alt / F3",  ecodes.KEY_RIGHTALT,  [ecodes.KEY_F3, ecodes.KEY_F13]),
         "ai":         ("F4",  ecodes.KEY_F4,  [ecodes.KEY_F14]),
@@ -144,5 +164,98 @@ class Config:
     })
 
 
+# ---------------------------------------------------------------------------
+# User config loading (config.toml -> overrides on top of defaults)
+# ---------------------------------------------------------------------------
+def _load_user_toml() -> Dict[str, Any]:
+    """Read config.toml, returning {} if absent or malformed."""
+    if not CONFIG_FILE.exists():
+        return {}
+    try:
+        with open(CONFIG_FILE, "rb") as f:
+            return tomllib.load(f)
+    except Exception as e:
+        print(f"⚠️ Failed to parse {CONFIG_FILE}: {e} — using defaults")
+        return {}
+
+
+def _resolve_keycode(name: str) -> int:
+    """
+    Resolve an evdev key name to its keycode.
+
+    Accepts "F3", "KEY_F3", "RIGHTALT", "right alt" (case/underscore tolerant).
+    Raises ValueError on an unknown name.
+    """
+    candidate = name.strip().upper().replace(" ", "_")
+    if not candidate.startswith("KEY_"):
+        candidate = f"KEY_{candidate}"
+    code = getattr(ecodes, candidate, None)
+    if not isinstance(code, int):
+        raise ValueError(f"unknown key name '{name}'")
+    return code
+
+
+def _build_hotkeys(
+    base: Dict[str, Tuple[str, int, List[int]]],
+    overrides: Dict[str, Any],
+) -> Dict[str, Tuple[str, int, List[int]]]:
+    """Apply [hotkeys] overrides (lists of key names) onto the base defs."""
+    result = dict(base)
+    for mode, names in overrides.items():
+        if mode not in result:
+            print(f"⚠️ config.toml [hotkeys]: unknown mode '{mode}' — ignored")
+            continue
+        if isinstance(names, str):
+            names = [names]
+        try:
+            codes = [_resolve_keycode(n) for n in names]
+        except ValueError as e:
+            print(f"⚠️ config.toml [hotkeys.{mode}]: {e} — keeping default")
+            continue
+        if not codes:
+            continue
+        label = " / ".join(str(n).upper().replace("KEY_", "") for n in names)
+        result[mode] = (label, codes[0], codes[1:])
+    return result
+
+
+def _build_config() -> Config:
+    """Construct the global Config, layering config.toml over the defaults."""
+    data = _load_user_toml()
+    if not data:
+        return Config()
+
+    base = Config()
+    overrides: Dict[str, Any] = {}
+
+    trans = data.get("transcription", {})
+    if "model" in trans:
+        overrides["MODEL_WHISPER"] = str(trans["model"])
+    if "language" in trans:
+        overrides["WHISPER_LANGUAGE"] = str(trans["language"])
+    if "sample_rate" in trans:
+        overrides["SAMPLE_RATE"] = int(trans["sample_rate"])
+
+    models = data.get("models", {})
+    if "chat" in models:
+        overrides["MODEL_CHAT"] = str(models["chat"])
+    if "vision" in models:
+        overrides["MODEL_VISION"] = str(models["vision"])
+    if "tts" in models:
+        overrides["MODEL_TTS"] = str(models["tts"])
+
+    overlay = data.get("overlay", {})
+    if "width" in overlay:
+        overrides["OVERLAY_WIDTH"] = int(overlay["width"])
+    if "height" in overlay:
+        overrides["OVERLAY_HEIGHT"] = int(overlay["height"])
+
+    hotkeys = data.get("hotkeys", {})
+    if hotkeys:
+        overrides["HOTKEY_DEFS"] = _build_hotkeys(base.HOTKEY_DEFS, hotkeys)
+
+    return replace(base, **overrides)
+
+
 # Global config instance
-CFG = Config()
+CFG = _build_config()

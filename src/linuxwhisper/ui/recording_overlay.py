@@ -57,7 +57,7 @@ class GtkOverlay(Gtk.Window):
         if visual and screen.is_composited():
             self.set_visual(visual)
 
-        w, h = 220, 60
+        w, h = CFG.OVERLAY_WIDTH, CFG.OVERLAY_HEIGHT
 
         if HAS_LAYER_SHELL and SESSION_TYPE == "wayland":
             # --- Wayland: gtk-layer-shell ---
@@ -90,7 +90,7 @@ class GtkOverlay(Gtk.Window):
     def _setup_ui(self) -> None:
         """Setup drawing area and animation."""
         self.drawing_area = Gtk.DrawingArea()
-        self.drawing_area.set_size_request(220, 60)
+        self.drawing_area.set_size_request(CFG.OVERLAY_WIDTH, CFG.OVERLAY_HEIGHT)
         self.drawing_area.connect("draw", self._on_draw)
         self.add(self.drawing_area)
         self.timeout_id = GLib.timeout_add(40, self._animate)

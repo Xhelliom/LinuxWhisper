@@ -1,0 +1,38 @@
+# LinuxWhisper user configuration.
+#
+# Copy to ~/.config/linuxwhisper/config.toml and edit. Every key is OPTIONAL;
+# anything omitted falls back to the built-in defaults in config.py. A missing
+# or malformed file is ignored (the app still starts on defaults).
+
+[transcription]
+# Whisper model served by Groq (this app uses the Groq Cloud API, not a local
+# model — so values like "base.en" do NOT work here).
+model = "whisper-large-v3"
+# Force a transcription language as an ISO-639-1 code, e.g. "en", "fr", "de".
+# Omit or leave "" to let Whisper autodetect.
+language = ""
+# Capture sample rate in Hz. Whisper resamples to 16 kHz internally, so 16000
+# uploads less data with no quality loss; 44100 is the historical default.
+sample_rate = 44100
+
+[models]
+# Groq chat / vision / TTS model ids.
+chat = "moonshotai/kimi-k2-instruct"
+vision = "meta-llama/llama-4-scout-17b-16e-instruct"
+tts = "canopylabs/orpheus-v1-english"
+
+[hotkeys]
+# evdev key names without the KEY_ prefix (case-insensitive). The first entry is
+# the primary key, the rest are aliases. List available names with:
+#   python -c "from evdev import ecodes; print([k for k in dir(ecodes) if k.startswith('KEY_')])"
+dictation  = ["RIGHTALT", "F3", "F13"]
+ai         = ["F4", "F14"]
+ai_rewrite = ["F7"]
+vision     = ["F8"]
+pin        = ["F9"]
+tts        = ["F10"]
+
+[overlay]
+# Recording overlay size in pixels.
+width = 220
+height = 60
