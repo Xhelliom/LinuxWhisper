@@ -63,6 +63,6 @@ jobs:
           name: whisper.cpp engine ${{ steps.ver.outputs.ver }}
           body: >
             Prebuilt, statically-linked, portable whisper-cli binaries for
-            LinuxWhisper offline transcription. Consumed by the .deb and
+            Loquivox offline transcription. Consumed by the .deb and
             AppImage packaging recipes.
           files: dist/whisper-cli-${{ matrix.arch }}

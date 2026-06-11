@@ -15,7 +15,7 @@ the full external-dependency recensement.
 
 Offline transcription uses the standalone `whisper-cli` binary, **not** the
 `pywhispercpp` Python binding (which is packaged nowhere). The backend finds it
-via `$LINUXWHISPER_WHISPER_CLI`, a bundled `<prefix>/lib/linuxwhisper/whisper-cli`,
+via `$LOQUIVOX_WHISPER_CLI`, a bundled `<prefix>/lib/loquivox/whisper-cli`,
 or `$PATH`. The pinned engine version lives in **`whisper-cpp.version`** (single
 source of truth for the PKGBUILD and the CI workflow).
 
@@ -34,17 +34,17 @@ updpkgsums            # fill in sha256sums (needs the v<pkgver> tag to exist)
 makepkg -si           # AUR deps (python-groq, python-sounddevice, …) via yay/paru
 ```
 Builds a static `whisper-cli` from source and installs it to
-`/usr/lib/linuxwhisper/whisper-cli`.
+`/usr/lib/loquivox/whisper-cli`.
 
 ### .deb
 Build **on the distro you target** (the bundled venv is tied to that distro's
 python ABI):
 ```sh
-VERSION=1.1.0 packaging/deb/build-deb.sh   # → dist/linuxwhisper_<ver>_<arch>.deb
+VERSION=1.1.0 packaging/deb/build-deb.sh   # → dist/loquivox_<ver>_<arch>.deb
 ```
 Hybrid strategy: apt provides the system stack + numpy/scipy/gi/cairo/tomlkit/
 openai; `groq`/`sounddevice`/`deepgram-sdk` + the app are bundled into a
-`--system-site-packages` venv under `/opt/linuxwhisper`.
+`--system-site-packages` venv under `/opt/loquivox`.
 
 ### Third-party licenses
 ```sh

@@ -1,12 +1,12 @@
 # Maintainer: Xhelliom
-pkgname=linuxwhisper
+pkgname=loquivox
 pkgver=1.1.0
 pkgrel=1
 # whisper.cpp engine version — keep in sync with packaging/whisper-cpp.version
 _whispercpp_ver=1.8.6
 pkgdesc="Voice-Assistant & AI Companion for Linux (push-to-talk voice dictation)"
 arch=('x86_64' 'aarch64')
-url="https://github.com/Xhelliom/LinuxWhisper"
+url="https://github.com/Xhelliom/loquivox"
 license=('MIT')
 depends=(
   'python'
@@ -49,7 +49,7 @@ sha256sums=('SKIP' 'SKIP')
 
 build() {
   # 1) the Python application wheel
-  cd "$srcdir/LinuxWhisper-$pkgver"
+  cd "$srcdir/loquivox-$pkgver"
   python -m build --wheel --no-isolation
 
   # 2) the offline engine: a self-contained, statically-linked whisper-cli
@@ -65,14 +65,14 @@ build() {
 }
 
 package() {
-  cd "$srcdir/LinuxWhisper-$pkgver"
+  cd "$srcdir/loquivox-$pkgver"
   python -m installer --destdir="$pkgdir" dist/*.whl
 
-  # offline engine, discovered by the backend at <prefix>/lib/linuxwhisper/
+  # offline engine, discovered by the backend at <prefix>/lib/loquivox/
   install -Dm755 "$srcdir/whisper.cpp-$_whispercpp_ver/build/bin/whisper-cli" \
     "$pkgdir/usr/lib/$pkgname/whisper-cli"
 
-  install -Dm644 packaging/linuxwhisper.desktop \
+  install -Dm644 packaging/loquivox.desktop \
     "$pkgdir/usr/share/applications/$pkgname.desktop"
   install -Dm644 assets/logo.png \
     "$pkgdir/usr/share/pixmaps/$pkgname.png"

@@ -1,6 +1,6 @@
-# LinuxWhisper user configuration.
+# Loquivox user configuration.
 #
-# Copy to ~/.config/linuxwhisper/config.toml and edit. Every key is OPTIONAL;
+# Copy to ~/.config/loquivox/config.toml and edit. Every key is OPTIONAL;
 # anything omitted falls back to the built-in defaults in config.py. A missing
 # or malformed file is ignored (the app still starts on defaults).
 

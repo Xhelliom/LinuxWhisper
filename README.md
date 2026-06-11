@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="assets/logo.png" alt="LinuxWhisper Logo" width="180" height="auto" />
+<img src="assets/logo.png" alt="Loquivox Logo" width="180" height="auto" />
 
-# LinuxWhisper
+# Loquivox
 
 **A Voice-Assistant & AI Companion for Linux**
 
@@ -12,11 +12,11 @@
 
 ---
 
-**LinuxWhisper** is a simple voice assistant designed to help you with daily tasks. It uses global hotkeys to provide AI-powered tools without switching windows.
+**Loquivox** is a simple voice assistant designed to help you with daily tasks. It uses global hotkeys to provide AI-powered tools without switching windows.
 
 <br />
 
-![LinuxWhisper Demo](assets/demo.gif)
+![Loquivox Demo](assets/demo.gif)
 
 </div>
 
@@ -77,7 +77,7 @@ The app auto-detects your session type (X11 or Wayland) and uses the appropriate
 
 ### 2. Installation
 ```bash
-git clone https://github.com/Dianjeol/LinuxWhisper.git && cd LinuxWhisper
+git clone https://github.com/Xhelliom/loquivox.git && cd loquivox
 ./setup.sh
 ```
 
@@ -89,10 +89,10 @@ The setup script automatically detects your distribution and session type, then 
 export GROQ_API_KEY="your_key"
 
 # Start the whisperer
-linuxwhisper
+loquivox
 
 # Or alternatively:
-python -m linuxwhisper
+python -m loquivox
 ```
 
 > [!TIP]
@@ -106,12 +106,12 @@ For best overlay behaviour, add these rules to `~/.config/niri/config.kdl`:
 
 ```kdl
 layer-rule {
-    match namespace="linuxwhisper-recording"
+    match namespace="loquivox-recording"
     shadow { on false }
 }
 
 layer-rule {
-    match namespace="linuxwhisper-chat"
+    match namespace="loquivox-chat"
     shadow { on false }
 }
 ```
@@ -121,9 +121,9 @@ layer-rule {
 ## 📂 Project Structure
 
 ```
-src/linuxwhisper/
+src/loquivox/
 ├── __init__.py          # Package version
-├── __main__.py          # python -m linuxwhisper
+├── __main__.py          # python -m loquivox
 ├── app.py               # main() entry point
 ├── config.py            # Config dataclass + CFG singleton
 ├── state.py             # AppState + SettingsManager + STATE

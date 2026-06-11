@@ -8,7 +8,7 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
 
-echo -e "${BLUE}🛠  LinuxWhisper Setup${NC}"
+echo -e "${BLUE}🛠  Loquivox Setup${NC}"
 
 # ---------------------------------------------------------------------------
 # 1. Detect Distribution
@@ -102,7 +102,7 @@ fi
 # ---------------------------------------------------------------------------
 # 6. Install Package (editable mode)
 # ---------------------------------------------------------------------------
-echo -e "${BLUE}⬇️  Installing LinuxWhisper package...${NC}"
+echo -e "${BLUE}⬇️  Installing Loquivox package...${NC}"
 ./venv/bin/pip install --upgrade pip
 ./venv/bin/pip install -e .
 
@@ -111,7 +111,7 @@ echo -e "${BLUE}⬇️  Installing LinuxWhisper package...${NC}"
 # ---------------------------------------------------------------------------
 echo ""
 echo -e "${BLUE}🚀 Autostart Setup${NC}"
-read -p "Add LinuxWhisper to autostart? (y/N): " add_autostart
+read -p "Add Loquivox to autostart? (y/N): " add_autostart
 if [[ "$add_autostart" =~ ^[yYjJ] ]]; then
     # Parse GROQ_API_KEY from .bashrc or environment if it exists
     API_KEY=""
@@ -121,16 +121,16 @@ if [[ "$add_autostart" =~ ^[yYjJ] ]]; then
 
     AUTOSTART_DIR="$HOME/.config/autostart"
     mkdir -p "$AUTOSTART_DIR"
-    DESKTOP_FILE="$AUTOSTART_DIR/linuxwhisper.desktop"
+    DESKTOP_FILE="$AUTOSTART_DIR/loquivox.desktop"
     
     # Write desktop file
     echo "[Desktop Entry]" > "$DESKTOP_FILE"
     echo "Type=Application" >> "$DESKTOP_FILE"
-    echo "Name=LinuxWhisper" >> "$DESKTOP_FILE"
+    echo "Name=Loquivox" >> "$DESKTOP_FILE"
     echo "Comment=Voice-Assistant & AI Companion for Linux" >> "$DESKTOP_FILE"
     echo "Icon=$PWD/assets/logo.png" >> "$DESKTOP_FILE"
     
-    EXEC_CMD="$PWD/venv/bin/linuxwhisper"
+    EXEC_CMD="$PWD/venv/bin/loquivox"
     
     if [ -n "$API_KEY" ]; then
         echo "Exec=env GROQ_API_KEY=\"$API_KEY\" $EXEC_CMD" >> "$DESKTOP_FILE"
@@ -154,13 +154,13 @@ if [ "$SESSION_TYPE" = "wayland" ] && command -v niri &>/dev/null; then
     echo -e "${BLUE}📝 Niri Tip:${NC} For best overlay behaviour, add this to ~/.config/niri/config.kdl:"
     echo ""
     echo '  layer-rule {
-      match namespace="linuxwhisper-recording"
+      match namespace="loquivox-recording"
       // Recording overlay: no shadow, no blur
       shadow { on false }
   }
 
   layer-rule {
-      match namespace="linuxwhisper-chat"
+      match namespace="loquivox-chat"
       // Chat overlay
       shadow { on false }
   }'
@@ -175,10 +175,10 @@ echo -e "${BLUE}🔒 Setting permissions for multi-user access...${NC}"
 chmod -R a+rX venv
 
 echo ""
-echo "To run LinuxWhisper:"
+echo "To run Loquivox:"
 echo "  1. Set your API key: export GROQ_API_KEY=\"your_key\""
-echo "  2. Run: linuxwhisper"
-echo "     Or:  python -m linuxwhisper"
+echo "  2. Run: loquivox"
+echo "     Or:  python -m loquivox"
 echo ""
 echo "Session: $SESSION_TYPE | Distro: $DISTRO"
 echo ""

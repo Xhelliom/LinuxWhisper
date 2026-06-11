@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 #
-# Build a self-distributed .deb for LinuxWhisper.
+# Build a self-distributed .deb for Loquivox.
 #
 # Strategy (Debian/Ubuntu have no AUR equivalent): pull everything that IS in
 # apt as normal Depends (GTK stack, numpy/scipy/gi/cairo/tomlkit/openai, …), and
 # bundle only what apt lacks (groq, sounddevice, deepgram-sdk) + the app itself
-# into a venv under /opt/linuxwhisper created with --system-site-packages. The
+# into a venv under /opt/loquivox created with --system-site-packages. The
 # offline whisper.cpp engine is built static and shipped at
-# /usr/lib/linuxwhisper/whisper-cli.
+# /usr/lib/loquivox/whisper-cli.
 #
 # Build-time needs (in the builder): python3-venv, python3-pip, cmake,
 # build-essential, git, dpkg-dev, plus the runtime apt deps so the venv can see
@@ -25,10 +25,10 @@ ARCH="$(dpkg --print-architecture)"
 
 STAGE="$(mktemp -d)"
 PKGROOT="$STAGE/pkgroot"
-REAL_OPT="/opt/linuxwhisper"   # final install path — built here so venv shebangs are correct
+REAL_OPT="/opt/loquivox"   # final install path — built here so venv shebangs are correct
 trap 'rm -rf "$STAGE"' EXIT
 
-echo "▶ LinuxWhisper .deb — version=$VERSION arch=$ARCH whisper.cpp=$WHISPER_VER"
+echo "▶ Loquivox .deb — version=$VERSION arch=$ARCH whisper.cpp=$WHISPER_VER"
 
 # 1) venv: app + the pip deps apt doesn't carry (--no-deps for the app so pip
 #    doesn't try to rebuild apt-provided PyGObject/pycairo/numpy/scipy).
@@ -51,26 +51,26 @@ cmake --build "$STAGE/wcpp/build" -j"$(nproc)" --target whisper-cli
 mkdir -p "$PKGROOT/opt" "$PKGROOT/usr/bin" "$PKGROOT/DEBIAN"
 cp -a "$REAL_OPT" "$PKGROOT/opt/"
 install -Dm755 "$STAGE/wcpp/build/bin/whisper-cli" \
-  "$PKGROOT/usr/lib/linuxwhisper/whisper-cli"
-install -Dm644 packaging/linuxwhisper.desktop \
-  "$PKGROOT/usr/share/applications/linuxwhisper.desktop"
+  "$PKGROOT/usr/lib/loquivox/whisper-cli"
+install -Dm644 packaging/loquivox.desktop \
+  "$PKGROOT/usr/share/applications/loquivox.desktop"
 install -Dm644 assets/logo.png \
-  "$PKGROOT/usr/share/pixmaps/linuxwhisper.png"
+  "$PKGROOT/usr/share/pixmaps/loquivox.png"
 install -Dm644 LICENSE \
-  "$PKGROOT/usr/share/doc/linuxwhisper/copyright"
+  "$PKGROOT/usr/share/doc/loquivox/copyright"
 
 # launcher: point the backend at the bundled engine regardless of sys.prefix
-cat > "$PKGROOT/usr/bin/linuxwhisper" <<'EOF'
+cat > "$PKGROOT/usr/bin/loquivox" <<'EOF'
 #!/bin/sh
-export LINUXWHISPER_WHISPER_CLI="${LINUXWHISPER_WHISPER_CLI:-/usr/lib/linuxwhisper/whisper-cli}"
-exec /opt/linuxwhisper/venv/bin/linuxwhisper "$@"
+export LOQUIVOX_WHISPER_CLI="${LOQUIVOX_WHISPER_CLI:-/usr/lib/loquivox/whisper-cli}"
+exec /opt/loquivox/venv/bin/loquivox "$@"
 EOF
-chmod 755 "$PKGROOT/usr/bin/linuxwhisper"
+chmod 755 "$PKGROOT/usr/bin/loquivox"
 
 # 4) control
 INSTALLED_KB="$(du -sk "$PKGROOT" | cut -f1)"
 cat > "$PKGROOT/DEBIAN/control" <<EOF
-Package: linuxwhisper
+Package: loquivox
 Version: $VERSION
 Architecture: $ARCH
 Maintainer: Xhelliom <noreply@example.com>
@@ -80,7 +80,7 @@ Recommends: xdotool, xclip, x11-utils, gnome-screenshot
 Suggests: wtype, wl-clipboard, grim
 Section: utils
 Priority: optional
-Homepage: https://github.com/Xhelliom/LinuxWhisper
+Homepage: https://github.com/Xhelliom/loquivox
 Description: Voice-Assistant & AI Companion for Linux
  Push-to-talk voice dictation that types transcribed speech into any app.
  Cloud backends (Groq/OpenAI/Deepgram) plus a bundled offline whisper.cpp
@@ -90,6 +90,6 @@ EOF
 # 5) build the .deb
 OUT="$REPO/dist"
 mkdir -p "$OUT"
-DEB="$OUT/linuxwhisper_${VERSION}_${ARCH}.deb"
+DEB="$OUT/loquivox_${VERSION}_${ARCH}.deb"
 dpkg-deb --root-owner-group --build "$PKGROOT" "$DEB"
 echo "✅ Built: $DEB"
