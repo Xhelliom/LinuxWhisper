@@ -54,7 +54,7 @@ if [ "$DISTRO" = "debian" ]; then
         echo -e "${BLUE}📦 Installing Wayland-specific packages...${NC}"
         sudo apt install -y wtype wl-clipboard grim gtk-layer-shell-dev
     else
-        sudo apt install -y xdotool gnome-screenshot
+        sudo apt install -y xdotool x11-utils gnome-screenshot
     fi
 
 elif [ "$DISTRO" = "arch" ]; then
@@ -68,7 +68,7 @@ elif [ "$DISTRO" = "arch" ]; then
         echo -e "${BLUE}📦 Installing Wayland-specific packages...${NC}"
         sudo pacman -S --noconfirm --needed wtype wl-clipboard grim gtk-layer-shell
     else
-        sudo pacman -S --noconfirm --needed xdotool xclip gnome-screenshot
+        sudo pacman -S --noconfirm --needed xdotool xclip xorg-xprop gnome-screenshot
     fi
 fi
 
