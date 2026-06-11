@@ -2,8 +2,10 @@
 pkgname=linuxwhisper
 pkgver=1.1.0
 pkgrel=1
+# whisper.cpp engine version — keep in sync with packaging/whisper-cpp.version
+_whispercpp_ver=1.8.6
 pkgdesc="Voice-Assistant & AI Companion for Linux (push-to-talk voice dictation)"
-arch=('any')
+arch=('x86_64' 'aarch64')
 url="https://github.com/Xhelliom/LinuxWhisper"
 license=('MIT')
 depends=(
@@ -32,28 +34,43 @@ optdepends=(
   'wl-clipboard: clipboard access (Wayland)'
   'grim: screen capture for the vision feature (Wayland)'
   'gtk-layer-shell: overlay positioning (Wayland)'
-  # --- optional transcription backends ---
+  # --- optional cloud transcription backends ---
   'python-openai: OpenAI realtime streaming backend'
   'python-deepgram-sdk: Deepgram streaming backend'
-  # --- offline transcription engine ---
-  'whisper.cpp: offline transcription (provides the whisper-cli binary)'
-  # NOTE: offline now uses the standalone whisper-cli binary (whisper.cpp),
-  # discovered on PATH or bundled at /usr/lib/linuxwhisper/whisper-cli.
-  # TODO(packaging): build it via cmake in this recipe so offline works
-  # out-of-the-box, instead of relying on the optional whisper.cpp dep.
+  # Offline transcription (whisper.cpp) is built in — see build()/package().
 )
-makedepends=('python-build' 'python-installer' 'python-wheel' 'python-setuptools')
-source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('SKIP')  # replace with updpkgsums output once the v$pkgver tag exists
+makedepends=('python-build' 'python-installer' 'python-wheel' 'python-setuptools' 'cmake')
+source=(
+  "$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz"
+  "whisper.cpp-$_whispercpp_ver.tar.gz::https://github.com/ggml-org/whisper.cpp/archive/refs/tags/v$_whispercpp_ver.tar.gz"
+)
+# Replace both with updpkgsums output once the v$pkgver tag exists.
+sha256sums=('SKIP' 'SKIP')
 
 build() {
+  # 1) the Python application wheel
   cd "$srcdir/LinuxWhisper-$pkgver"
   python -m build --wheel --no-isolation
+
+  # 2) the offline engine: a self-contained, statically-linked whisper-cli
+  #    (BUILD_SHARED_LIBS=OFF → single binary, no libwhisper/libggml .so deps)
+  cd "$srcdir/whisper.cpp-$_whispercpp_ver"
+  cmake -B build \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DBUILD_SHARED_LIBS=OFF \
+    -DWHISPER_BUILD_TESTS=OFF \
+    -DWHISPER_BUILD_EXAMPLES=ON \
+    -DWHISPER_BUILD_SERVER=OFF
+  cmake --build build -j"$(nproc)" --target whisper-cli
 }
 
 package() {
   cd "$srcdir/LinuxWhisper-$pkgver"
   python -m installer --destdir="$pkgdir" dist/*.whl
+
+  # offline engine, discovered by the backend at <prefix>/lib/linuxwhisper/
+  install -Dm755 "$srcdir/whisper.cpp-$_whispercpp_ver/build/bin/whisper-cli" \
+    "$pkgdir/usr/lib/$pkgname/whisper-cli"
 
   install -Dm644 packaging/linuxwhisper.desktop \
     "$pkgdir/usr/share/applications/$pkgname.desktop"
