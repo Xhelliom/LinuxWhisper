@@ -1,0 +1,61 @@
+# Maintainer: Xhelliom
+pkgname=linuxwhisper
+pkgver=1.1.0
+pkgrel=1
+pkgdesc="Voice-Assistant & AI Companion for Linux (push-to-talk voice dictation)"
+arch=('any')
+url="https://github.com/Xhelliom/LinuxWhisper"
+license=('MIT')
+depends=(
+  'python'
+  'python-numpy'
+  'python-scipy'
+  'python-sounddevice'   # AUR — audio capture + TTS playback (PortAudio)
+  'python-evdev'
+  'python-groq'          # AUR — default transcription backend
+  'python-gobject'
+  'python-cairo'
+  'python-tomlkit'
+  'gtk3'
+  'webkit2gtk-4.1'
+  'libayatana-appindicator'
+  'speexdsp'
+)
+optdepends=(
+  # --- X11 session tools ---
+  'xdotool: keystroke injection (X11)'
+  'xclip: clipboard access (X11)'
+  'xorg-xprop: focused-terminal detection (X11)'
+  'gnome-screenshot: screen capture for the vision feature (X11)'
+  # --- Wayland session tools ---
+  'wtype: keystroke injection (Wayland)'
+  'wl-clipboard: clipboard access (Wayland)'
+  'grim: screen capture for the vision feature (Wayland)'
+  'gtk-layer-shell: overlay positioning (Wayland)'
+  # --- optional transcription backends ---
+  'python-openai: OpenAI realtime streaming backend'
+  'python-deepgram-sdk: Deepgram streaming backend'
+  # NOTE: offline whisper.cpp (pywhispercpp) is not yet packaged for Arch
+  # (absent from repos and AUR). Until a python-pywhispercpp package exists,
+  # build it from source in a venv; see packaging/system-dependencies.md.
+)
+makedepends=('python-build' 'python-installer' 'python-wheel' 'python-setuptools')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')  # replace with updpkgsums output once the v$pkgver tag exists
+
+build() {
+  cd "$srcdir/LinuxWhisper-$pkgver"
+  python -m build --wheel --no-isolation
+}
+
+package() {
+  cd "$srcdir/LinuxWhisper-$pkgver"
+  python -m installer --destdir="$pkgdir" dist/*.whl
+
+  install -Dm644 packaging/linuxwhisper.desktop \
+    "$pkgdir/usr/share/applications/$pkgname.desktop"
+  install -Dm644 assets/logo.png \
+    "$pkgdir/usr/share/pixmaps/$pkgname.png"
+  install -Dm644 LICENSE \
+    "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

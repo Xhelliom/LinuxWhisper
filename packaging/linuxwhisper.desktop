@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=LinuxWhisper
+GenericName=Voice Dictation
+Comment=Voice-Assistant & AI Companion for Linux
+Exec=linuxwhisper
+Icon=linuxwhisper
+Terminal=false
+Categories=Utility;Accessibility;
+Keywords=voice;dictation;speech;transcription;whisper;ai;
+StartupNotify=false
