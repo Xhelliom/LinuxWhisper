@@ -783,6 +783,7 @@ class SettingsDialog:
     _HOTKEY_LABELS = {
         "dictation": "Dictation", "ai": "AI Chat", "ai_rewrite": "Rewrite",
         "vision": "Vision", "pin": "Pin Chat", "tts": "TTS Toggle",
+        "cancel": "Cancel", "pause": "Pause / Resume",
     }
 
     @classmethod
@@ -824,7 +825,7 @@ class SettingsDialog:
         hint.set_halign(Gtk.Align.START)
         hint.set_markup(
             "<small><i>Click <b>⌨ Set</b> then press the key — or type space-separated "
-            "evdev names (first = primary, rest = aliases). Applied after a service restart.</i></small>"
+            "evdev names (first = primary, rest = aliases). Applied instantly on save.</i></small>"
         )
         vbox.pack_start(hint, False, False, 0)
 
@@ -873,11 +874,14 @@ class SettingsDialog:
             cls._set_hotkey_status(f"❌ {e}")
             return
 
-        cls._set_hotkey_status(
-            "✓ Saved. Restart to apply: "
-            "<tt>systemctl --user restart app-linuxwhisper@autostart.service</tt>"
-        )
-        print(f"⌨️  Hotkeys saved: {parsed}")
+        # Apply live: reload config and rebuild the keyboard listener's map so
+        # the new bindings take effect immediately — no service restart needed.
+        from linuxwhisper import config as config_module
+        from linuxwhisper.handlers.keyboard import KeyboardHandler
+        KeyboardHandler.reload_hotkeys(config_module.reload_config())
+
+        cls._set_hotkey_status("✓ Saved and applied — your new hotkeys work right away.")
+        print(f"⌨️  Hotkeys saved and applied live: {parsed}")
 
     @classmethod
     def _set_hotkey_status(cls, markup: str) -> None:

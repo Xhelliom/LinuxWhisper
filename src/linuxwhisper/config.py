@@ -208,6 +208,10 @@ class Config:
         "vision":     ("F8",  ecodes.KEY_F8,  [ecodes.KEY_PLAYPAUSE]),
         "pin":        ("F9",  ecodes.KEY_F9,  [ecodes.KEY_NEXTSONG]),
         "tts":        ("F10", ecodes.KEY_F10, [ecodes.KEY_MUTE]),
+        # Cancel the active recording / in-flight transcription (no text inserted).
+        "cancel":     ("Esc", ecodes.KEY_ESC, []),
+        # Pause / resume the current recording (capture is held, not stopped).
+        "pause":      ("Space", ecodes.KEY_SPACE, []),
     })
 
 
@@ -346,9 +350,10 @@ def reload_config() -> Config:
     to apply edits live).
 
     Note: modules that did ``from linuxwhisper.config import CFG`` keep their old
-    reference, so settings that are only read at import/startup (overlay size,
-    hotkeys) still need a service restart. Transcription settings DO apply live
-    because the dispatcher is reconfigured from the returned fresh config.
+    reference, so settings that are only read at import/startup (e.g. overlay
+    size) still need a service restart. Transcription settings apply live because
+    the dispatcher is reconfigured from the returned fresh config; hotkeys apply
+    live because KeyboardHandler.reload_hotkeys() rebuilds its keycode map from it.
     """
     global CFG
     CFG = _build_config()

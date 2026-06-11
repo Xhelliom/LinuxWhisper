@@ -20,8 +20,8 @@ class AudioService:
 
     @staticmethod
     def audio_callback(indata: np.ndarray, frames: int, time_info: Any, status: Any) -> None:
-        """Capture audio chunks into buffer while recording."""
-        if not STATE.recording:
+        """Capture audio chunks into buffer while recording (skipped if paused)."""
+        if not STATE.recording or STATE.paused:
             return
 
         data_copy = indata.copy()
@@ -51,6 +51,7 @@ class AudioService:
         """Start audio recording stream (and a live session if the backend streams)."""
         STATE.audio_buffer = []
         STATE.stream_session = None
+        STATE.paused = False
         AudioService._clear_viz_queue()
 
         dispatcher = get_dispatcher()
@@ -80,6 +81,7 @@ class AudioService:
     def stop_recording() -> Optional[np.ndarray]:
         """Stop recording and return audio data."""
         STATE.recording = False
+        STATE.paused = False
         if STATE.stream:
             STATE.stream.stop()
             STATE.stream.close()

@@ -53,6 +53,34 @@ class ModeHandler:
             OverlayManager.hide()
 
     @staticmethod
+    @run_on_main_thread
+    def cancel_active() -> None:
+        """
+        Abort the current recording and/or in-flight transcription without
+        inserting any text (bound to the 'cancel' hotkey, default Esc).
+
+        Bumping ``recording_generation`` makes any transcription already running
+        in a worker thread fail the stale-guard in ``process()`` — so it is
+        dropped before it can paste. The audio stream (if still open) is stopped
+        and its buffer discarded. Safe to call from any thread.
+        """
+        was_active = STATE.recording or STATE.stream_session is not None
+        # Supersede any in-flight transcription so its result is discarded.
+        STATE.recording_generation += 1
+        if STATE.recording:
+            try:
+                AudioService.stop_recording()  # closes the stream, no processing
+            except Exception:
+                pass
+        STATE.audio_buffer = []
+        STATE.stream_session = None
+        STATE.current_mode = None
+        STATE.paused = False
+        OverlayManager.hide()
+        if was_active:
+            print("✖️  Cancelled — nothing inserted")
+
+    @staticmethod
     def process_audio_async(mode: str, audio_data: np.ndarray) -> None:
         """
         Transcribe and process audio off the calling thread.
@@ -82,8 +110,9 @@ class ModeHandler:
             # Run processing (API calls etc) on the GTK main thread
             GLib.idle_add(lambda: ModeHandler.process(mode, transcribed, generation))
         else:
-            # Nothing to insert (too short / failed) — clear the indicator.
-            OverlayManager.hide()
+            # Nothing to insert (too short / failed) — clear the indicator, but
+            # only if a newer recording hasn't already taken over the overlay.
+            OverlayManager.hide(generation)
 
     @staticmethod
     def _maybe_postprocess(mode: str, text: str) -> str:
@@ -131,7 +160,7 @@ class ModeHandler:
             transcribed = ModeHandler._maybe_postprocess(mode, transcribed)
             GLib.idle_add(lambda: ModeHandler.process(mode, transcribed, generation))
         else:
-            OverlayManager.hide()
+            OverlayManager.hide(generation)
 
     @staticmethod
     def process(mode: str, transcribed_text: str, generation: Optional[int] = None) -> None:
@@ -141,7 +170,8 @@ class ModeHandler:
         # transcription was in flight.
         if generation is not None and generation != STATE.recording_generation:
             print(f"⏭️ Ignored stale transcription (gen {generation}): '{transcribed_text}'")
-            OverlayManager.hide()
+            # Do NOT hide unconditionally: a newer recording owns the overlay now.
+            OverlayManager.hide(generation)
             return
 
         # --- Hallucination Guard ---
@@ -150,7 +180,7 @@ class ModeHandler:
         clean = transcribed_text.strip().lower().rstrip(".!?")
         if clean in CFG.HALLUCINATIONS or len(clean) < 2:
             print(f"⚠️ Ignored Hallucination: '{transcribed_text}'")
-            OverlayManager.hide()
+            OverlayManager.hide(generation)
             return
 
         handlers = {
@@ -165,7 +195,7 @@ class ModeHandler:
                 handler(transcribed_text)
         finally:
             # Clear the 'transcribing' indicator once insertion is done.
-            OverlayManager.hide()
+            OverlayManager.hide(generation)
 
     @staticmethod
     def _handle_dictation(text: str) -> None:
