@@ -3,8 +3,10 @@ Text-to-speech service using Groq Orpheus.
 """
 from __future__ import annotations
 
-import subprocess
 import threading
+
+import sounddevice as sd
+from scipy.io import wavfile
 
 from linuxwhisper.api import get_client
 from linuxwhisper.config import CFG
@@ -29,7 +31,12 @@ class TTSService:
                     response_format="wav"
                 )
                 response.write_to_file(CFG.TEMP_TTS_PATH)
-                subprocess.run(["aplay", "-q", CFG.TEMP_TTS_PATH], capture_output=True)
+                # Play via sounddevice/PortAudio (already a dependency for
+                # recording) instead of shelling out to `aplay`, so the app
+                # needs no external ALSA binary at runtime.
+                samplerate, data = wavfile.read(CFG.TEMP_TTS_PATH)
+                sd.play(data, samplerate)
+                sd.wait()
             except Exception as e:
                 print(f"❌ TTS Error: {e}")
 
