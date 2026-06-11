@@ -1,0 +1,68 @@
+name: Build whisper.cpp engine
+
+# Conditional on purpose: the whisper-cli binary only changes when we bump the
+# pinned whisper.cpp version — NOT on every app push or release. So this runs
+# only when manually dispatched, or when the version pin / this workflow change.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'packaging/whisper-cpp.version'
+      - '.github/workflows/build-whisper-engine.yml'
+
+permissions:
+  contents: write   # publish the built binaries as a release asset
+
+jobs:
+  build:
+    name: build (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-24.04,     arch: x86_64 }
+          - { runner: ubuntu-24.04-arm, arch: aarch64 }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read pinned whisper.cpp version
+        id: ver
+        run: echo "ver=$(tr -d '[:space:]' < packaging/whisper-cpp.version)" >> "$GITHUB_OUTPUT"
+
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y cmake build-essential
+
+      - name: Build static, portable whisper-cli
+        run: |
+          ver='${{ steps.ver.outputs.ver }}'
+          git clone --depth 1 --branch "$ver" https://github.com/ggml-org/whisper.cpp.git wcpp
+          # GGML_NATIVE=OFF → no -march=native, so the binary runs on any CPU of
+          # this arch. BUILD_SHARED_LIBS=OFF → a single self-contained binary.
+          cmake -S wcpp -B wcpp/build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DGGML_NATIVE=OFF \
+            -DWHISPER_BUILD_TESTS=OFF \
+            -DWHISPER_BUILD_EXAMPLES=ON \
+            -DWHISPER_BUILD_SERVER=OFF
+          cmake --build wcpp/build -j"$(nproc)" --target whisper-cli
+          mkdir -p dist
+          cp wcpp/build/bin/whisper-cli "dist/whisper-cli-${{ matrix.arch }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: whisper-cli-${{ matrix.arch }}
+          path: dist/whisper-cli-${{ matrix.arch }}
+
+      - name: Publish to engine release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: whisper-engine-${{ steps.ver.outputs.ver }}
+          name: whisper.cpp engine ${{ steps.ver.outputs.ver }}
+          body: >
+            Prebuilt, statically-linked, portable whisper-cli binaries for
+            LinuxWhisper offline transcription. Consumed by the .deb and
+            AppImage packaging recipes.
+          files: dist/whisper-cli-${{ matrix.arch }}
