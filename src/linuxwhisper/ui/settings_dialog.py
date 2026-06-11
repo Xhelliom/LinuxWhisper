@@ -419,6 +419,10 @@ class SettingsDialog:
 
         # 1) install pywhispercpp if absent
         if not backend.is_available():
+            if not cls._can_pip_install():
+                status(f"whisper.cpp: ❌ {cls._MANAGED_ENV_HINT}")
+                GLib.idle_add(lambda: btn.set_sensitive(True))
+                return
             status("whisper.cpp: ⏳ installing pywhispercpp…")
             try:
                 proc = subprocess.run(
@@ -561,11 +565,44 @@ class SettingsDialog:
         threading.Thread(target=work, daemon=True).start()
 
     @staticmethod
+    def _can_pip_install() -> bool:
+        """
+        Whether installing packages at runtime via pip is viable.
+
+        True only inside a writable virtualenv. In a system/distro install
+        (immutable env, PEP 668 "externally managed", or read-only
+        site-packages) we must NOT shell out to pip — optional backends are
+        expected to be provided by the OS package instead.
+        """
+        import os
+        import sys
+        import sysconfig
+
+        # Not in a venv → never touch a system/managed interpreter.
+        if sys.prefix == sys.base_prefix:
+            return False
+        # PEP 668: interpreter explicitly marked externally managed.
+        stdlib = sysconfig.get_path("stdlib") or ""
+        if stdlib and os.path.exists(os.path.join(stdlib, "EXTERNALLY-MANAGED")):
+            return False
+        # site-packages must be writable.
+        purelib = sysconfig.get_path("purelib") or ""
+        return bool(purelib) and os.access(purelib, os.W_OK)
+
+    # Shown when a runtime pip-install isn't possible (packaged/managed env).
+    _MANAGED_ENV_HINT = (
+        "managed install — add this optional backend via your package "
+        "manager (or reinstall in a venv), not from the app"
+    )
+
+    @staticmethod
     def _pip_install(pip_name: str):
         """Run pip install in-process venv. Returns (ok, last_output_line)."""
         import importlib
         import subprocess
         import sys
+        if not SettingsDialog._can_pip_install():
+            return False, SettingsDialog._MANAGED_ENV_HINT
         try:
             proc = subprocess.run(
                 [sys.executable, "-m", "pip", "install", pip_name],
