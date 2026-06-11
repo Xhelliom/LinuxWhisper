@@ -34,8 +34,9 @@ def resample_down(audio: np.ndarray, src_rate: int, target_rate: int) -> Tuple[n
 
 def to_mono_16k(audio: np.ndarray, src_rate: int) -> np.ndarray:
     """
-    Return a contiguous 1-D float32 array at exactly 16 kHz, mono — the format
-    pywhispercpp expects for a raw numpy input. Resamples up or down as needed.
+    Return a contiguous 1-D float32 array at exactly 16 kHz, mono — the rate
+    every Whisper variant runs at. The whisper.cpp backend converts this to a
+    16-bit PCM WAV for the engine. Resamples up or down as needed.
     """
     data = audio
     if src_rate != WHISPER_RATE:

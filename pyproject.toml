@@ -25,8 +25,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Local offline transcription / automatic offline fallback (whisper.cpp).
-local = ["pywhispercpp"]
+# Local offline transcription uses the standalone whisper.cpp `whisper-cli`
+# binary (bundled by the packaging recipes), not a Python binding — so it
+# needs no optional Python dependency here.
 # Streaming live transcription backends.
 openai = ["openai>=2"]
 deepgram = ["deepgram-sdk>=7"]

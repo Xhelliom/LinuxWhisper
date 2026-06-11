@@ -35,9 +35,12 @@ optdepends=(
   # --- optional transcription backends ---
   'python-openai: OpenAI realtime streaming backend'
   'python-deepgram-sdk: Deepgram streaming backend'
-  # NOTE: offline whisper.cpp (pywhispercpp) is not yet packaged for Arch
-  # (absent from repos and AUR). Until a python-pywhispercpp package exists,
-  # build it from source in a venv; see packaging/system-dependencies.md.
+  # --- offline transcription engine ---
+  'whisper.cpp: offline transcription (provides the whisper-cli binary)'
+  # NOTE: offline now uses the standalone whisper-cli binary (whisper.cpp),
+  # discovered on PATH or bundled at /usr/lib/linuxwhisper/whisper-cli.
+  # TODO(packaging): build it via cmake in this recipe so offline works
+  # out-of-the-box, instead of relying on the optional whisper.cpp dep.
 )
 makedepends=('python-build' 'python-installer' 'python-wheel' 'python-setuptools')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")

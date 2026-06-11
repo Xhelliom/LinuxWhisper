@@ -385,7 +385,7 @@ class SettingsDialog:
         model = CFG.WHISPERCPP_MODEL
         installed, downloaded = WhisperCppBackend(model).local_status()
         if not installed:
-            msg = "whisper.cpp: ⚪ not installed — <tt>pip install -e '.[local]'</tt>"
+            msg = "whisper.cpp: ⚪ engine not found (<tt>whisper-cli</tt> missing)"
         elif downloaded:
             msg = f"whisper.cpp: ✅ model <b>{model}</b> downloaded (offline ready)"
         else:
@@ -404,9 +404,6 @@ class SettingsDialog:
 
     @classmethod
     def _setup_whispercpp_worker(cls, btn: Gtk.Button) -> None:
-        import importlib
-        import subprocess
-        import sys
         from gi.repository import GLib
 
         from linuxwhisper.transcription.whispercpp_backend import WhisperCppBackend
@@ -417,38 +414,22 @@ class SettingsDialog:
         model = CFG.WHISPERCPP_MODEL
         backend = WhisperCppBackend(model)
 
-        # 1) install pywhispercpp if absent
+        # The engine is a bundled binary (whisper-cli), not a pip package — if
+        # it's missing there's nothing to install from here.
         if not backend.is_available():
-            if not cls._can_pip_install():
-                status(f"whisper.cpp: ❌ {cls._MANAGED_ENV_HINT}")
-                GLib.idle_add(lambda: btn.set_sensitive(True))
-                return
-            status("whisper.cpp: ⏳ installing pywhispercpp…")
-            try:
-                proc = subprocess.run(
-                    [sys.executable, "-m", "pip", "install", "pywhispercpp"],
-                    capture_output=True, text=True, timeout=900,
-                )
-            except Exception as e:
-                status(f"whisper.cpp: ❌ install failed: {e}")
-                GLib.idle_add(lambda: btn.set_sensitive(True))
-                return
-            importlib.invalidate_caches()
-            if proc.returncode != 0 or not backend.is_available():
-                tail = (proc.stderr or proc.stdout or "").strip().splitlines()
-                why = tail[-1] if tail else "see logs"
-                status(f"whisper.cpp: ❌ install failed — {why}")
-                GLib.idle_add(lambda: btn.set_sensitive(True))
-                return
-
-        # 2) download + load the model
-        status(f"whisper.cpp: ⏳ downloading model <b>{model}</b>…")
-        try:
-            backend.prewarm()
-        except Exception as e:
-            status(f"whisper.cpp: ❌ download failed: {e}")
+            status("whisper.cpp: ❌ engine binary (<tt>whisper-cli</tt>) not found")
             GLib.idle_add(lambda: btn.set_sensitive(True))
             return
+
+        # Download the ggml model on first use (the only thing we fetch).
+        if not backend.is_model_downloaded():
+            status(f"whisper.cpp: ⏳ downloading model <b>{model}</b>…")
+            try:
+                backend._download_model()
+            except Exception as e:
+                status(f"whisper.cpp: ❌ download failed: {e}")
+                GLib.idle_add(lambda: btn.set_sensitive(True))
+                return
 
         GLib.idle_add(cls._refresh_whisper_status)
         GLib.idle_add(lambda: btn.set_sensitive(True))
