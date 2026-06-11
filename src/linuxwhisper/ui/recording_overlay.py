@@ -45,7 +45,8 @@ class GtkOverlay(Gtk.Window):
     """Floating recording overlay with a smoothed EQ-style waveform."""
 
     NUM_BARS = 28
-    MAX_BAR = 16          # px half-height of the tallest bar
+    MAX_BAR = 10          # px half-height of the tallest bar (kept short so the
+                          # text band above can grow to two lines within OVERLAY_HEIGHT)
     FRAME_MS = 16         # ~60 fps
     SLIDE_PX = 10         # how far the content slides up while fading in
 
@@ -106,6 +107,7 @@ class GtkOverlay(Gtk.Window):
     def _setup_ui(self) -> None:
         """Setup drawing area and animation state."""
         self.transcribing = False
+        self.paused = False
         self.live_text = ""
         self._tick = 0
         self._last_audio_tick = 0
@@ -135,6 +137,11 @@ class GtkOverlay(Gtk.Window):
         self.live_text = text or ""
         self.drawing_area.queue_draw()
 
+    def set_paused(self, paused: bool) -> None:
+        """Toggle the 'paused' indicator (bars freeze, text shows Paused)."""
+        self.paused = paused
+        self.drawing_area.queue_draw()
+
     # ---------------------------------------------------------------- anim
     def _animate(self) -> bool:
         """Per-frame tick (~60 fps): ease opacity + bars, then repaint."""
@@ -148,7 +155,8 @@ class GtkOverlay(Gtk.Window):
             self.destroy()
             return False  # removes this timeout source
 
-        if not self.transcribing:
+        # Freeze the waveform while transcribing (pulse instead) or paused.
+        if not self.transcribing and not self.paused:
             self._update_bars()
         self.drawing_area.queue_draw()
         return True
@@ -208,12 +216,17 @@ class GtkOverlay(Gtk.Window):
         # Slide the content up as it fades in.
         cr.translate(0, (1.0 - a) * self.SLIDE_PX)
 
+        # Live transcripts grow from the right, so we keep the full text and let
+        # the renderer ellipsize the START — the latest words stay visible and
+        # never spill onto the mic icon.
+        live = False
         if self.transcribing:
             text = "Transcription…"
+        elif self.paused:
+            text = "Paused ⏸"
         elif self.live_text:
-            text = self.live_text[-32:]
-            if len(self.live_text) > 32:
-                text = "…" + text
+            text = self.live_text
+            live = True
         else:
             text = self.config["text"]
 
@@ -222,12 +235,13 @@ class GtkOverlay(Gtk.Window):
         self.render_content(
             cr, w, h, scheme=scheme, mode=self.mode, text=text,
             bars=self._bars, tick=self._tick, font_family=self._font_family,
-            transcribing=self.transcribing, a=a,
+            transcribing=self.transcribing, a=a, ellipsize_start=live,
         )
 
     @classmethod
     def render_content(cls, cr, w, h, *, scheme, mode, text, bars, tick,
-                       font_family, transcribing=False, a=1.0):
+                       font_family, transcribing=False, a=1.0,
+                       ellipsize_start=False):
         """
         Paint the overlay bubble at (0, 0, w, h). Pure of widget state so the
         settings dialog can render an identical preview by passing its own
@@ -245,12 +259,21 @@ class GtkOverlay(Gtk.Window):
         cr.set_line_width(1)
         cr.stroke()
 
-        # Icon (left), text (centered, top), activity (bars / pulse, below).
+        # Icon (left), text (centered in the area right of the icon, top),
+        # activity (bars / pulse, below). Boxing the text right of the icon
+        # keeps long live transcripts from spilling over the glyph.
         if transcribing:
             cls._icon_spinner(cr, 30, h / 2, fg_rgb, a, tick)
         else:
             cls._draw_icon(cr, mode, 30, h / 2, fg_rgb, a)
-        cls._draw_text(cr, font_family, text, w / 2, 19, 9.5, fg_rgb, a)
+        text_left, text_right = 46, w - 8
+        text_w = max(40, text_right - text_left)
+        # cy is the *center* of the text band; a one-line label sits centered,
+        # a wrapped two-line live transcript fills the band symmetrically. Text
+        # band and waveform are balanced so the content is vertically centered
+        # (no top-glued text / empty middle).
+        cls._draw_text(cr, font_family, text, text_left + text_w / 2, 18, 8.5,
+                       fg_rgb, a, max_width=text_w, ellipsize_start=ellipsize_start)
         if transcribing:
             cls._draw_pulse(cr, 58, w - 8, 42, fg_rgb, a, tick)
         else:
@@ -258,8 +281,17 @@ class GtkOverlay(Gtk.Window):
 
     # ---------------------------------------------------------------- text
     @staticmethod
-    def _draw_text(cr, font_family, text, cx, cy, size, color, a):
-        """Center text horizontally at cx, vertically at cy, via Pango."""
+    def _draw_text(cr, font_family, text, cx, cy, size, color, a,
+                   max_width=None, ellipsize_start=False):
+        """
+        Center text horizontally at cx, vertically at cy, via Pango.
+
+        When ``max_width`` is given the text is constrained to that width and
+        wrapped over up to two lines. For ``ellipsize_start`` (a growing live
+        transcript) we keep the most recent two lines — a leading ``…`` marks
+        text that scrolled off the top — and left-align them so the words flow
+        like a teleprompter. Short labels stay centered on a single line.
+        """
         layout = PangoCairo.create_layout(cr)
         fd = Pango.FontDescription()
         fd.set_family(font_family)
@@ -267,9 +299,34 @@ class GtkOverlay(Gtk.Window):
         fd.set_weight(Pango.Weight.SEMIBOLD)
         layout.set_font_description(fd)
         layout.set_text(text, -1)
-        tw, th = layout.get_pixel_size()
         cr.set_source_rgba(*color, a)
-        cr.move_to(cx - tw / 2, cy - th / 2)
+        if max_width is not None:
+            layout.set_width(int(max_width * Pango.SCALE))
+            layout.set_wrap(Pango.WrapMode.WORD_CHAR)
+            if ellipsize_start:
+                # Live transcript: wrap the full text, then keep only the window
+                # starting at the second-to-last line so the latest words stay
+                # visible. Done by hand (rather than Pango's multi-line START
+                # ellipsize, which drops the marker on an interior line) so the
+                # "…" sits at the very start and the flow reads top→bottom.
+                n = layout.get_line_count()
+                if n > 2:
+                    start = layout.get_line(n - 2).start_index
+                    tail = text.encode("utf-8")[start:].decode("utf-8", "ignore")
+                    layout.set_text("… " + tail.lstrip(), -1)
+                layout.set_alignment(Pango.Alignment.LEFT)
+                # Safety net if the windowed text still spills over two lines.
+                layout.set_height(-2)
+                layout.set_ellipsize(Pango.EllipsizeMode.END)
+            else:
+                layout.set_alignment(Pango.Alignment.CENTER)
+                layout.set_height(-2)
+                layout.set_ellipsize(Pango.EllipsizeMode.END)
+            _, th = layout.get_pixel_size()
+            cr.move_to(cx - max_width / 2, cy - th / 2)
+        else:
+            tw, th = layout.get_pixel_size()
+            cr.move_to(cx - tw / 2, cy - th / 2)
         PangoCairo.show_layout(cr, layout)
 
     # --------------------------------------------------------------- icons

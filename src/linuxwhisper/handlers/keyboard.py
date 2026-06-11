@@ -29,13 +29,28 @@ logger = logging.getLogger(__name__)
 class KeyboardHandler:
     """Global keyboard listener using evdev (works on X11 + Wayland)."""
 
-    # Build a flat lookup: keycode -> mode_id
-    # for all recording modes + toggle actions
+    # Flat lookup keycode -> mode_id for all recording modes + toggle actions.
+    # Rebuilt by reload_hotkeys() so edits in the settings UI apply live
+    # (the listener reads this dict on every key event — no restart needed).
     _KEY_TO_MODE: Dict[int, str] = {}
-    for mode_id, (_, primary, extras) in CFG.HOTKEY_DEFS.items():
-        _KEY_TO_MODE[primary] = mode_id
-        for extra in extras:
-            _KEY_TO_MODE[extra] = mode_id
+
+    @classmethod
+    def reload_hotkeys(cls, config: Any = None) -> None:
+        """
+        Rebuild the keycode→mode map from ``config`` (or the live ``CFG``).
+
+        Called once at import time and again by the settings UI after the
+        user edits hotkeys, so new bindings take effect immediately without
+        restarting the service. A brand-new dict is assigned (never mutated
+        in place) so the listener thread always reads a consistent map.
+        """
+        cfg = config if config is not None else CFG
+        mapping: Dict[int, str] = {}
+        for mode_id, (_, primary, extras) in cfg.HOTKEY_DEFS.items():
+            mapping[primary] = mode_id
+            for extra in extras:
+                mapping[extra] = mode_id
+        cls._KEY_TO_MODE = mapping
 
     @staticmethod
     def _is_keyboard(dev: InputDevice) -> bool:
@@ -175,9 +190,23 @@ class KeyboardHandler:
         elif key_event.keystate == key_event.key_up:
             cls._on_release(mode)
 
+    # Hotkeys that act on the session itself rather than starting a recording.
+    _NON_RECORDING_ACTIONS = ("pin", "tts", "cancel", "pause")
+
     @classmethod
     def _on_press(cls, mode: str) -> None:
         """Handle key press for a recognized mode."""
+        # Cancel the active recording / in-flight transcription (no insert).
+        if mode == "cancel":
+            ModeHandler.cancel_active()
+            return
+
+        # Pause / resume the current recording (only while one is active).
+        if mode == "pause":
+            if STATE.recording:
+                cls._toggle_pause()
+            return
+
         # Pin toggle (non-recording action)
         if mode == "pin":
             if not STATE.recording:
@@ -211,8 +240,20 @@ class KeyboardHandler:
             AudioService.start_recording()
 
     @classmethod
+    def _toggle_pause(cls) -> None:
+        """Flip the paused state of the active recording and reflect it on the overlay."""
+        STATE.paused = not STATE.paused
+        OverlayManager.set_paused(STATE.paused)
+        print("⏸️  Paused" if STATE.paused else "▶️  Resumed")
+
+    @classmethod
     def _on_release(cls, mode: str) -> None:
         """Handle key release for a recognized mode."""
+        # Session-action keys only act on press; their release is a no-op
+        # (and must not stop a recording that is still in progress, e.g. paused).
+        if mode in cls._NON_RECORDING_ACTIONS:
+            return
+
         if not STATE.recording:
             return
 
@@ -369,3 +410,7 @@ class KeyboardHandler:
                 except Exception:
                     pass
             sel.close()
+
+
+# Populate the keycode→mode map from the config loaded at import time.
+KeyboardHandler.reload_hotkeys()

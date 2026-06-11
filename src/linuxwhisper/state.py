@@ -90,6 +90,9 @@ class AppState:
     # Monotonic counter bumped on each new recording; used to discard a
     # transcription whose recording was superseded before it returned.
     recording_generation: int = 0
+    # True while a recording is paused: audio is neither buffered nor streamed,
+    # but the input stream stays open so capture can resume instantly.
+    paused: bool = False
 
     # --- UI Windows ---
     overlay_window: Optional[Any] = None   # GtkOverlay instance

@@ -34,7 +34,9 @@ def main() -> None:
         "ai_rewrite": "Smart Rewrite - Highlight text & speak to edit",
         "vision": "Empathic Vision / Screenshot (Groq Llama 4)",
         "pin": "Toggle Chat Overlay Pin Mode",
-        "tts": "Toggle TTS (Read AI responses aloud)"
+        "tts": "Toggle TTS (Read AI responses aloud)",
+        "cancel": "Cancel recording / transcription (no text inserted)",
+        "pause": "Pause / resume the current recording",
     }
 
     i = 1
