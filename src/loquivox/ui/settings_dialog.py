@@ -863,14 +863,13 @@ class SettingsDialog:
         cls._hotkey_entries = {}
         cls._hotkey_capture_btns = []
 
-        for i, (mode_id, (_label, primary, extras)) in enumerate(CFG.HOTKEY_DEFS.items()):
+        for i, (mode_id, (_label, specs)) in enumerate(CFG.HOTKEY_DEFS.items()):
             name = cls._HOTKEY_LABELS.get(mode_id, mode_id.replace("_", " ").title())
             lbl = Gtk.Label(label=name + ":")
             lbl.set_halign(Gtk.Align.START)
             entry = Gtk.Entry()
             entry.set_hexpand(True)
-            names = [cls._keycode_to_name(c) for c in [primary, *extras]]
-            entry.set_text(" ".join(n for n in names if n))
+            entry.set_text(" ".join(specs))
 
             capture_btn = Gtk.Button(label="⌨ Set")
             capture_btn.set_tooltip_text("Press a key to bind it (no need to know its name)")
@@ -887,8 +886,9 @@ class SettingsDialog:
         hint = Gtk.Label()
         hint.set_halign(Gtk.Align.START)
         hint.set_markup(
-            "<small><i>Click <b>⌨ Set</b> then press the key — or type space-separated "
-            "evdev names (first = primary, rest = aliases). Applied instantly on save.</i></small>"
+            "<small><i>Click <b>⌨ Set</b> then press a key or combo (e.g. Alt+Space) — "
+            "or type space-separated specs like <tt>ALT+SPACE F3</tt> (first = primary, "
+            "rest = aliases; combos join with <tt>+</tt>). Applied instantly on save.</i></small>"
         )
         vbox.pack_start(hint, False, False, 0)
 
@@ -902,19 +902,10 @@ class SettingsDialog:
         apply_row.pack_start(cls._hotkey_status, True, True, 0)
         vbox.pack_start(apply_row, False, False, 0)
 
-    @staticmethod
-    def _keycode_to_name(code: int) -> str:
-        """Reverse an evdev keycode to a clean key name (e.g. 'RIGHTALT')."""
-        from evdev import ecodes
-        name = ecodes.KEY.get(code)
-        if isinstance(name, (list, tuple)):
-            name = name[0]
-        return name.replace("KEY_", "") if name else str(code)
-
     @classmethod
     def _on_apply_hotkeys(cls, _btn: Gtk.Button) -> None:
-        """Validate every binding, then write [hotkeys] to config.toml."""
-        from loquivox.config import _resolve_keycode
+        """Validate every chord spec, then write [hotkeys] to config.toml."""
+        from loquivox.config import parse_chord
 
         parsed: dict = {}
         for mode_id, entry in cls._hotkey_entries.items():
@@ -922,13 +913,15 @@ class SettingsDialog:
             if not raw:
                 cls._set_hotkey_status(f"❌ {mode_id}: at least one key is required.")
                 return
-            for n in raw:  # validate now so we never write a broken binding
+            specs = []
+            for tok in raw:  # validate now so we never write a broken binding
                 try:
-                    _resolve_keycode(n)
+                    parse_chord(tok)
                 except ValueError:
-                    cls._set_hotkey_status(f"❌ unknown key '{n}' for {mode_id}.")
+                    cls._set_hotkey_status(f"❌ invalid binding '{tok}' for {mode_id}.")
                     return
-            parsed[mode_id] = [n.strip().upper().replace("KEY_", "") for n in raw]
+                specs.append(tok.strip().upper())
+            parsed[mode_id] = specs
 
         from loquivox.config_io import ConfigWriteError, update_section
         try:

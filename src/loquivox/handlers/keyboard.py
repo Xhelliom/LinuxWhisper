@@ -9,12 +9,12 @@ from __future__ import annotations
 
 import logging
 import selectors
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import evdev
-from evdev import InputDevice, categorize, ecodes
+from evdev import InputDevice, ecodes
 
-from loquivox.config import CFG
+from loquivox.config import CFG, MODIFIER_CODES, modifier_name, resolve_hotkeys
 from loquivox.handlers.mode import ModeHandler
 from loquivox.managers.chat import ChatManager
 from loquivox.managers.overlay import OverlayManager
@@ -29,28 +29,34 @@ logger = logging.getLogger(__name__)
 class KeyboardHandler:
     """Global keyboard listener using evdev (works on X11 + Wayland)."""
 
-    # Flat lookup keycode -> mode_id for all recording modes + toggle actions.
-    # Rebuilt by reload_hotkeys() so edits in the settings UI apply live
-    # (the listener reads this dict on every key event — no restart needed).
-    _KEY_TO_MODE: Dict[int, str] = {}
+    # Resolved bindings keyed by TRIGGER keycode → list of (mode, modifier
+    # groups). Rebuilt by reload_hotkeys() so settings edits apply live. The
+    # listener tracks held keys (_held) so combos like ALT+SPACE match; _active
+    # remembers which mode a trigger fired so its key-up releases the right one.
+    _BY_TRIGGER: Dict[int, List[Tuple[str, Tuple[frozenset, ...]]]] = {}
+    _held: set = set()
+    _active: Dict[int, str] = {}
 
     @classmethod
     def reload_hotkeys(cls, config: Any = None) -> None:
         """
-        Rebuild the keycode→mode map from ``config`` (or the live ``CFG``).
+        Rebuild the trigger→bindings map from ``config`` (or the live ``CFG``).
 
-        Called once at import time and again by the settings UI after the
-        user edits hotkeys, so new bindings take effect immediately without
-        restarting the service. A brand-new dict is assigned (never mutated
-        in place) so the listener thread always reads a consistent map.
+        Called once at import time and again by the settings UI after the user
+        edits hotkeys, so new bindings take effect immediately without a
+        restart. Bindings sharing a trigger are sorted most-specific-first (most
+        modifiers), so a combo (ALT+SPACE) wins over the bare key (SPACE) when
+        its modifiers are held. A brand-new dict is assigned (never mutated in
+        place) so the listener thread always reads a consistent map.
         """
         cfg = config if config is not None else CFG
-        mapping: Dict[int, str] = {}
-        for mode_id, (_, primary, extras) in cfg.HOTKEY_DEFS.items():
-            mapping[primary] = mode_id
-            for extra in extras:
-                mapping[extra] = mode_id
-        cls._KEY_TO_MODE = mapping
+        by_trigger: Dict[int, List[Tuple[str, Tuple[frozenset, ...]]]] = {}
+        for mode_id, bindings in resolve_hotkeys(cfg).items():
+            for trigger, mods in bindings:
+                by_trigger.setdefault(trigger, []).append((mode_id, mods))
+        for entries in by_trigger.values():
+            entries.sort(key=lambda b: len(b[1]), reverse=True)
+        cls._BY_TRIGGER = by_trigger
 
     @staticmethod
     def _is_keyboard(dev: InputDevice) -> bool:
@@ -102,13 +108,15 @@ class KeyboardHandler:
     @classmethod
     def capture_next_key(cls, timeout: float = 6.0) -> Optional[str]:
         """
-        Block until the next key is pressed on any keyboard and return its evdev
-        name (e.g. 'HOME', 'RIGHTALT'), or None on timeout / no device.
+        Block until the next key (or chord) is pressed and return its spec, or
+        None on timeout / no device. Returns a combo like ``"ALT+SPACE"`` when
+        modifiers are held, a lone modifier name (``"RIGHTALT"``) if a modifier
+        is tapped on its own, or a plain key name (``"F3"``) otherwise.
 
-        Used by the settings UI's "capture" button so the user can press a key
-        instead of guessing its evdev name. Devices are grabbed for the (short)
-        duration so the keypress doesn't leak to the focused app or trigger an
-        existing hotkey. Meant to run in a background thread; always ungrabs.
+        Used by the settings UI's "capture" button. Devices are grabbed for the
+        (short) duration so the keypress doesn't leak to the focused app or
+        trigger an existing hotkey. Meant to run in a background thread; always
+        ungrabs.
         """
         import time
 
@@ -129,6 +137,7 @@ class KeyboardHandler:
             except Exception:
                 pass  # grab is best-effort; capture still works passively
 
+        held: List[int] = []  # modifier keycodes currently down, in press order
         deadline = time.monotonic() + timeout
         try:
             while True:
@@ -141,11 +150,24 @@ class KeyboardHandler:
                     except Exception:
                         continue
                     for event in events:
-                        # First key-DOWN of a real KEY_* code wins.
-                        if event.type == ecodes.EV_KEY and event.value == 1:
-                            name = cls.keycode_to_name(event.code)
-                            if name:
-                                return name
+                        if event.type != ecodes.EV_KEY:
+                            continue
+                        code = event.code
+                        if event.value == 1:  # key down
+                            if code in MODIFIER_CODES:
+                                if code not in held:
+                                    held.append(code)  # part of a combo
+                            else:
+                                trigger = cls.keycode_to_name(code)
+                                if trigger:
+                                    mods = [modifier_name(c) for c in held]
+                                    return "+".join([*mods, trigger])
+                        elif event.value == 0 and code in held:  # modifier up
+                            held.remove(code)
+                            if not held:  # a lone modifier tapped → bind it as-is
+                                name = cls.keycode_to_name(code)
+                                if name:
+                                    return name
         finally:
             for dev in grabbed:
                 try:
@@ -163,9 +185,12 @@ class KeyboardHandler:
                     pass
 
     @classmethod
-    def _get_mode_for_keycode(cls, keycode: int) -> Optional[str]:
-        """Get mode name for a keycode, if any."""
-        return cls._KEY_TO_MODE.get(keycode)
+    def _match_binding(cls, trigger: int) -> Optional[str]:
+        """Mode whose chord (this trigger + currently-held modifiers) matches."""
+        for mode, mods in cls._BY_TRIGGER.get(trigger, ()):  # most-specific first
+            if all(group & cls._held for group in mods):
+                return mode
+        return None
 
     @classmethod
     def _is_recording_mode(cls, mode: str) -> bool:
@@ -174,21 +199,20 @@ class KeyboardHandler:
 
     @classmethod
     def _handle_key_event(cls, event: evdev.InputEvent) -> None:
-        """Process a single key event."""
-        key_event = categorize(event)
-        keycode = event.code
-
-        mode = cls._get_mode_for_keycode(keycode)
-        if mode is None:
-            return
-
-        # Key DOWN
-        if key_event.keystate == key_event.key_down:
-            cls._on_press(mode)
-
-        # Key UP
-        elif key_event.keystate == key_event.key_up:
-            cls._on_release(mode)
+        """Track held keys and fire press/release on the matching chord."""
+        code = event.code
+        if event.value == 1:        # key down
+            cls._held.add(code)
+            mode = cls._match_binding(code)
+            if mode is not None:
+                cls._active[code] = mode
+                cls._on_press(mode)
+        elif event.value == 0:      # key up
+            cls._held.discard(code)
+            mode = cls._active.pop(code, None)
+            if mode is not None:
+                cls._on_release(mode)
+        # event.value == 2 (autorepeat): ignore
 
     # Hotkeys that act on the session itself rather than starting a recording.
     _NON_RECORDING_ACTIONS = ("pin", "tts", "cancel", "pause")
