@@ -48,7 +48,8 @@ if [ "$DISTRO" = "debian" ]; then
         python3-venv python3-pip \
         libgirepository1.0-dev gcc libcairo2-dev pkg-config python3-dev \
         gir1.2-gtk-3.0 gir1.2-ayatanaappindicator3-0.1 gir1.2-webkit2-4.1 \
-        libspeexdsp-dev xclip
+        libspeexdsp-dev xclip \
+        cmake build-essential git
 
     if [ "$SESSION_TYPE" = "wayland" ]; then
         echo -e "${BLUE}📦 Installing Wayland-specific packages...${NC}"
@@ -62,7 +63,8 @@ elif [ "$DISTRO" = "arch" ]; then
         python python-pip \
         gobject-introspection gcc cairo pkgconf \
         gtk3 libayatana-appindicator webkit2gtk-4.1 \
-        speexdsp python-evdev
+        speexdsp python-evdev \
+        cmake git make
 
     if [ "$SESSION_TYPE" = "wayland" ]; then
         echo -e "${BLUE}📦 Installing Wayland-specific packages...${NC}"
@@ -105,6 +107,42 @@ fi
 echo -e "${BLUE}⬇️  Installing Loquivox package...${NC}"
 ./venv/bin/pip install --upgrade pip
 ./venv/bin/pip install -e .
+
+# ---------------------------------------------------------------------------
+# 6b. Build & bundle the offline engine (whisper.cpp whisper-cli)
+# ---------------------------------------------------------------------------
+# Offline transcription uses the standalone whisper-cli binary. The .deb/AUR
+# packages ship it; a from-source install must build it here, otherwise the
+# offline backend (and the settings "download" button) won't work. The backend
+# discovers it at <venv>/lib/loquivox/whisper-cli (i.e. sys.prefix/lib/...).
+WHISPER_VER="$(tr -d '[:space:]' < packaging/whisper-cpp.version)"
+ENGINE_DEST="venv/lib/loquivox/whisper-cli"
+if [ -f "$ENGINE_DEST" ]; then
+    echo -e "${BLUE}🎙️  Offline engine already present (${ENGINE_DEST}).${NC}"
+else
+    echo -e "${BLUE}🎙️  Building offline engine whisper-cli (${WHISPER_VER})…${NC}"
+    set +e
+    (
+        set -e
+        TMP="$(mktemp -d)"
+        trap 'rm -rf "$TMP"' EXIT
+        git clone --depth 1 --branch "$WHISPER_VER" \
+            https://github.com/ggml-org/whisper.cpp.git "$TMP/wcpp"
+        cmake -S "$TMP/wcpp" -B "$TMP/wcpp/build" \
+            -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF \
+            -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_EXAMPLES=ON \
+            -DWHISPER_BUILD_SERVER=OFF
+        cmake --build "$TMP/wcpp/build" -j"$(nproc)" --target whisper-cli
+        install -Dm755 "$TMP/wcpp/build/bin/whisper-cli" "$ENGINE_DEST"
+    )
+    set -e
+    if [ -f "$ENGINE_DEST" ]; then
+        echo -e "${GREEN}✅ Offline engine installed → ${ENGINE_DEST}${NC}"
+    else
+        echo -e "${YELLOW}⚠️  Offline engine build failed — cloud backends still work.${NC}"
+        echo -e "${YELLOW}   Retry setup.sh later, or install the 'whisper.cpp' package.${NC}"
+    fi
+fi
 
 # ---------------------------------------------------------------------------
 # 7. Optional Autostart
