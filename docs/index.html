@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Loquivox — Voice assistant &amp; AI companion for Linux</title>
+<meta name="description" content="Dictate, chat, rewrite and analyze your screen with global hotkeys. Powered by Whisper — fully offline if you want. Native GTK app for X11 and Wayland.">
+<meta property="og:title" content="Loquivox — Voice assistant for Linux">
+<meta property="og:description" content="Dictate anywhere, chat with AI, rewrite text by voice. Offline-capable, X11 &amp; Wayland, MIT licensed.">
+<meta property="og:image" content="assets/hero-dark.png">
+<meta property="og:type" content="website">
+<link rel="icon" type="image/png" href="assets/logo.png">
+<style>
+:root {
+  --bg: #f6f8fb;
+  --bg-elevated: #ffffff;
+  --bg-code: #0d1320;
+  --text: #16202e;
+  --text-muted: #5a6b80;
+  --accent: #2563eb;
+  --accent-soft: rgba(37, 99, 235, .1);
+  --accent-glow: rgba(56, 189, 248, .25);
+  --border: #e2e8f0;
+  --kbd-bg: #ffffff;
+  --kbd-border: #cbd5e1;
+  --shadow: 0 10px 30px rgba(15, 30, 60, .08);
+  --hero-img: url('assets/hero-light.png');
+  --hero-fade: linear-gradient(90deg, var(--bg) 0%, rgba(246,248,251,.92) 34%, rgba(246,248,251,.45) 62%, rgba(246,248,251,0) 100%);
+}
+[data-theme="dark"] {
+  --bg: #070b13;
+  --bg-elevated: #0e1522;
+  --bg-code: #0a101c;
+  --text: #e6edf6;
+  --text-muted: #8aa0b8;
+  --accent: #38bdf8;
+  --accent-soft: rgba(56, 189, 248, .1);
+  --accent-glow: rgba(56, 189, 248, .35);
+  --border: #1c2a3e;
+  --kbd-bg: #14203200;
+  --kbd-border: #2c4159;
+  --shadow: 0 10px 30px rgba(0, 0, 0, .45);
+  --hero-img: url('assets/hero-dark.png');
+  --hero-fade: linear-gradient(90deg, var(--bg) 0%, rgba(7,11,19,.9) 34%, rgba(7,11,19,.4) 62%, rgba(7,11,19,0) 100%);
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, "Helvetica Neue", Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+  transition: background .3s ease, color .3s ease;
+}
+a { color: var(--accent); text-decoration: none; }
+.container { max-width: 1100px; margin: 0 auto; padding: 0 24px; }
+
+/* ───── Nav ───── */
+nav {
+  position: sticky; top: 0; z-index: 50;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  border-bottom: 1px solid var(--border);
+}
+.nav-inner {
+  display: flex; align-items: center; justify-content: space-between;
+  height: 64px;
+}
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 1.15rem; color: var(--text); }
+.brand img { width: 34px; height: 34px; border-radius: 8px; }
+.nav-links { display: flex; align-items: center; gap: 26px; font-size: .95rem; }
+.nav-links a { color: var(--text-muted); font-weight: 500; transition: color .2s; }
+.nav-links a:hover { color: var(--accent); }
+#theme-toggle {
+  background: var(--accent-soft); color: var(--accent);
+  border: 1px solid var(--border); border-radius: 10px;
+  width: 38px; height: 38px; cursor: pointer; font-size: 1.05rem;
+  display: grid; place-items: center; transition: transform .2s;
+}
+#theme-toggle:hover { transform: scale(1.08); }
+
+/* ───── Hero ───── */
+.hero {
+  position: relative;
+  overflow: hidden;
+  border-bottom: 1px solid var(--border);
+}
+.hero::before {
+  content: "";
+  position: absolute; inset: 0;
+  background: var(--hero-img) center right / cover no-repeat;
+  opacity: .95;
+}
+.hero::after {
+  content: "";
+  position: absolute; inset: 0;
+  background: var(--hero-fade);
+}
+.hero-inner {
+  position: relative; z-index: 1;
+  padding: 110px 0 120px;
+  max-width: 620px;
+}
+.hero h1 {
+  font-size: clamp(2.4rem, 5.5vw, 3.6rem);
+  line-height: 1.12;
+  letter-spacing: -.02em;
+  margin-bottom: 20px;
+}
+.hero h1 .grad {
+  background: linear-gradient(92deg, var(--accent), #7dd3fc);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.hero p.sub {
+  font-size: 1.18rem;
+  color: var(--text-muted);
+  margin-bottom: 34px;
+  max-width: 540px;
+}
+.cta-row { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 30px; }
+.btn {
+  display: inline-flex; align-items: center; gap: 9px;
+  padding: 13px 26px; border-radius: 12px;
+  font-weight: 600; font-size: 1rem;
+  transition: transform .15s, box-shadow .2s;
+  cursor: pointer; border: none;
+}
+.btn:hover { transform: translateY(-2px); }
+.btn-primary {
+  background: linear-gradient(92deg, #2563eb, #38bdf8);
+  color: #fff;
+  box-shadow: 0 8px 24px var(--accent-glow);
+}
+.btn-ghost {
+  background: var(--bg-elevated);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+.hero-badges { display: flex; gap: 10px; flex-wrap: wrap; }
+.pill {
+  font-size: .82rem; font-weight: 600;
+  padding: 5px 13px; border-radius: 999px;
+  background: var(--accent-soft); color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+/* ───── Sections ───── */
+section { padding: 86px 0; }
+.section-title { font-size: 2rem; letter-spacing: -.01em; margin-bottom: 10px; text-align: center; }
+.section-sub { color: var(--text-muted); text-align: center; max-width: 560px; margin: 0 auto 52px; }
+
+/* Features */
+.features-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+  gap: 22px;
+}
+.card {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 28px;
+  box-shadow: var(--shadow);
+  transition: transform .2s, border-color .2s;
+}
+.card:hover { transform: translateY(-4px); border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
+.card .icon {
+  width: 46px; height: 46px; border-radius: 12px;
+  background: var(--accent-soft);
+  display: grid; place-items: center;
+  font-size: 1.4rem; margin-bottom: 16px;
+}
+.card h3 { font-size: 1.12rem; margin-bottom: 8px; }
+.card h3 .key {
+  font-size: .72rem; font-weight: 700; vertical-align: 2px;
+  margin-left: 8px; padding: 2px 8px; border-radius: 6px;
+  background: var(--accent-soft); color: var(--accent);
+}
+.card p { color: var(--text-muted); font-size: .95rem; }
+
+/* Demo mockup (pure CSS) */
+.demo-stage {
+  position: relative;
+  max-width: 860px; margin: 0 auto;
+  padding-bottom: 40px;
+}
+.mock-window {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  max-width: 640px;
+}
+.mock-titlebar {
+  display: flex; align-items: center; gap: 7px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.mock-titlebar .dot { width: 11px; height: 11px; border-radius: 50%; opacity: .85; }
+.mock-titlebar .dot:nth-child(1) { background: #f87171; }
+.mock-titlebar .dot:nth-child(2) { background: #fbbf24; }
+.mock-titlebar .dot:nth-child(3) { background: #34d399; }
+.mock-titlebar .title { margin-left: 10px; font-size: .8rem; color: var(--text-muted); }
+.mock-body { padding: 26px 28px 70px; font-size: .98rem; }
+.mock-body .line { height: 10px; border-radius: 6px; background: var(--border); margin-bottom: 14px; }
+.mock-body .line.w60 { width: 60%; }
+.mock-body .line.w85 { width: 85%; }
+.typed {
+  color: var(--text);
+  font-size: 1rem;
+  display: inline-block;
+  overflow: hidden; white-space: nowrap;
+  max-width: 100%;
+  vertical-align: bottom;
+  animation: typing 5s steps(46) infinite;
+  border-right: 2px solid var(--accent);
+}
+@keyframes typing {
+  0% { width: 0; }
+  60% { width: 46ch; }
+  92% { width: 46ch; }
+  100% { width: 0; }
+}
+.rec-pill {
+  position: absolute;
+  left: 50%; bottom: 0;
+  transform: translateX(-70%);
+  display: flex; align-items: center; gap: 14px;
+  background: color-mix(in srgb, var(--bg-elevated) 85%, var(--accent) 4%);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  border-radius: 999px;
+  padding: 14px 24px;
+  box-shadow: 0 14px 40px var(--accent-glow);
+  backdrop-filter: blur(8px);
+}
+.rec-dot {
+  width: 12px; height: 12px; border-radius: 50%;
+  background: #ef4444;
+  animation: pulse 1.4s ease-in-out infinite;
+}
+@keyframes pulse { 0%,100% { opacity: 1; transform: scale(1);} 50% { opacity: .45; transform: scale(.8);} }
+.wave { display: flex; align-items: center; gap: 3px; height: 30px; }
+.wave span {
+  width: 4px; border-radius: 3px;
+  background: linear-gradient(180deg, #38bdf8, #2563eb);
+  animation: bounce 1s ease-in-out infinite;
+}
+@keyframes bounce { 0%,100% { height: 22%; } 50% { height: 100%; } }
+.rec-label { font-size: .85rem; font-weight: 600; color: var(--text-muted); white-space: nowrap; }
+.rec-label kbd { font-size: .75rem; padding: 2px 8px; margin: 0 0 0 6px; }
+.chat-card {
+  position: absolute;
+  right: 0; top: 36px;
+  width: 270px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  padding: 16px;
+}
+.chat-card .chat-head {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: .78rem; font-weight: 700; color: var(--text-muted);
+  margin-bottom: 12px;
+}
+.chat-card .chat-head .live { color: var(--accent); }
+.bubble {
+  font-size: .85rem; line-height: 1.45;
+  border-radius: 12px; padding: 9px 13px; margin-bottom: 9px;
+  max-width: 92%;
+}
+.bubble.user {
+  background: linear-gradient(92deg, #2563eb, #38bdf8);
+  color: #fff; margin-left: auto;
+  border-bottom-right-radius: 4px;
+}
+.bubble.ai {
+  background: var(--accent-soft);
+  color: var(--text);
+  border-bottom-left-radius: 4px;
+}
+@media (max-width: 860px) {
+  .chat-card { display: none; }
+  .rec-pill { transform: translateX(-50%); }
+  .mock-window { max-width: 100%; }
+}
+
+/* Privacy / engines */
+.engine-cols {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+  gap: 22px;
+}
+.engine-cols .card ul { list-style: none; margin-top: 12px; }
+.engine-cols .card li {
+  color: var(--text-muted); font-size: .95rem;
+  padding: 6px 0 6px 26px; position: relative;
+}
+.engine-cols .card li::before {
+  content: "✓"; position: absolute; left: 0;
+  color: var(--accent); font-weight: 700;
+}
+
+/* Hotkeys */
+.hotkeys {
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  gap: 16px; max-width: 640px; margin: 0 auto;
+}
+@media (max-width: 560px) { .hotkeys { grid-template-columns: repeat(2, 1fr); } }
+.hotkey {
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  border-radius: 14px; padding: 20px; text-align: center;
+  box-shadow: var(--shadow);
+}
+kbd {
+  display: inline-block;
+  font-family: ui-monospace, "JetBrains Mono", "Fira Code", monospace;
+  font-size: 1rem; font-weight: 700;
+  background: var(--kbd-bg); color: var(--accent);
+  border: 1px solid var(--kbd-border);
+  border-bottom-width: 3px;
+  border-radius: 8px; padding: 6px 14px; margin-bottom: 10px;
+}
+.hotkey .name { font-weight: 600; font-size: .95rem; }
+.hotkey .desc { color: var(--text-muted); font-size: .82rem; }
+
+/* Install */
+#install { scroll-margin-top: 80px; }
+.tabs { max-width: 760px; margin: 0 auto; }
+.tab-buttons { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-bottom: 22px; }
+.tab-btn {
+  background: var(--bg-elevated); color: var(--text-muted);
+  border: 1px solid var(--border); border-radius: 10px;
+  padding: 10px 20px; font-size: .95rem; font-weight: 600;
+  cursor: pointer; transition: all .2s;
+}
+.tab-btn.active {
+  background: var(--accent-soft); color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+.tab-panel { display: none; }
+.tab-panel.active { display: block; animation: fadeIn .25s ease; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.codeblock {
+  position: relative;
+  background: var(--bg-code); color: #d7e4f4;
+  border: 1px solid var(--border); border-radius: 14px;
+  padding: 20px 22px; margin-bottom: 14px;
+  font-family: ui-monospace, "JetBrains Mono", "Fira Code", monospace;
+  font-size: .92rem; line-height: 1.7;
+  overflow-x: auto; white-space: pre;
+}
+.codeblock .cm { color: #5d748f; }
+.copy-btn {
+  position: absolute; top: 10px; right: 10px;
+  background: rgba(255,255,255,.08); color: #9fb6cf;
+  border: 1px solid rgba(255,255,255,.12); border-radius: 8px;
+  padding: 5px 11px; font-size: .78rem; cursor: pointer;
+  transition: background .2s;
+}
+.copy-btn:hover { background: rgba(255,255,255,.16); }
+.tab-note { color: var(--text-muted); font-size: .9rem; text-align: center; }
+.tab-note a { font-weight: 600; }
+
+/* Footer */
+footer {
+  border-top: 1px solid var(--border);
+  padding: 44px 0; text-align: center;
+  color: var(--text-muted); font-size: .92rem;
+}
+footer .links { display: flex; gap: 22px; justify-content: center; margin-bottom: 14px; }
+
+@media (max-width: 720px) {
+  .nav-links a:not(.gh) { display: none; }
+  .hero-inner { padding: 70px 0 80px; }
+  section { padding: 60px 0; }
+}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="container nav-inner">
+    <a class="brand" href="#"><img src="assets/logo.png" alt="Loquivox logo">Loquivox</a>
+    <div class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#hotkeys">Hotkeys</a>
+      <a href="#install">Install</a>
+      <a class="gh" href="https://github.com/Xhelliom/loquivox" target="_blank" rel="noopener">GitHub</a>
+      <button id="theme-toggle" aria-label="Toggle theme">🌙</button>
+    </div>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="container">
+    <div class="hero-inner">
+      <h1>Your voice, <span class="grad">everywhere</span> on Linux.</h1>
+      <p class="sub">Dictate into any app, chat with an AI, rewrite text or analyze your screen — all from a global hotkey. Powered by Whisper, <strong>fully offline if you want</strong>.</p>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="#install">⬇ Install now</a>
+        <a class="btn btn-ghost" href="https://github.com/Xhelliom/loquivox" target="_blank" rel="noopener">★ Star on GitHub</a>
+      </div>
+      <div class="hero-badges">
+        <span class="pill">X11 &amp; Wayland</span>
+        <span class="pill">Offline-capable</span>
+        <span class="pill">Native GTK</span>
+        <span class="pill">MIT licensed</span>
+      </div>
+    </div>
+  </div>
+</header>
+
+<section id="features">
+  <div class="container">
+    <h2 class="section-title">One hotkey away</h2>
+    <p class="section-sub">No window switching, no copy-paste gymnastics. Press a key, speak, done.</p>
+    <div class="features-grid">
+      <div class="card">
+        <div class="icon">🎙️</div>
+        <h3>Dictation<span class="key">F3</span></h3>
+        <p>Speak and watch your words appear at the cursor — in any application. Backed by Whisper large-v3 for state-of-the-art accuracy.</p>
+      </div>
+      <div class="card">
+        <div class="icon">💬</div>
+        <h3>AI Chat<span class="key">F4</span></h3>
+        <p>A lightweight chat overlay for quick questions and conversations, always one keystroke away. Pin it on top with F9.</p>
+      </div>
+      <div class="card">
+        <div class="icon">✍️</div>
+        <h3>Smart Rewrite<span class="key">F7</span></h3>
+        <p>Select any text, then tell Loquivox how to change it: "make it formal", "translate to English", "shorten this".</p>
+      </div>
+      <div class="card">
+        <div class="icon">👁️</div>
+        <h3>Vision<span class="key">F8</span></h3>
+        <p>Take a screenshot and ask about it. Llama 4 vision explains errors, summarizes pages, or reads what's on screen.</p>
+      </div>
+      <div class="card">
+        <div class="icon">🪄</div>
+        <h3>Refinement levels</h3>
+        <p>Raw transcript, grammar correction, full reformulation or translation — pick a post-processing level on the fly, per dictation.</p>
+      </div>
+      <div class="card">
+        <div class="icon">🔊</div>
+        <h3>Voice feedback<span class="key">F10</span></h3>
+        <p>Optional text-to-speech reads AI answers aloud, so you can stay hands-free from question to answer.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="demo" style="padding-top: 0;">
+  <div class="container">
+    <div class="demo-stage" aria-hidden="true">
+      <div class="mock-window">
+        <div class="mock-titlebar">
+          <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+          <span class="title">notes.md — any app, really</span>
+        </div>
+        <div class="mock-body">
+          <div class="line w85"></div>
+          <div class="line w60"></div>
+          <div class="line w85"></div>
+          <span class="typed">Ship the release notes by Friday, then call Sam.</span>
+        </div>
+      </div>
+      <div class="rec-pill">
+        <span class="rec-dot"></span>
+        <span class="wave">
+          <span style="animation-delay:0s"></span><span style="animation-delay:.12s"></span><span style="animation-delay:.24s"></span><span style="animation-delay:.06s"></span><span style="animation-delay:.3s"></span><span style="animation-delay:.18s"></span><span style="animation-delay:.04s"></span><span style="animation-delay:.26s"></span><span style="animation-delay:.1s"></span><span style="animation-delay:.2s"></span><span style="animation-delay:.32s"></span><span style="animation-delay:.14s"></span><span style="animation-delay:.02s"></span><span style="animation-delay:.28s"></span><span style="animation-delay:.08s"></span><span style="animation-delay:.22s"></span>
+        </span>
+        <span class="rec-label">Listening<kbd>F3</kbd></span>
+      </div>
+      <div class="chat-card">
+        <div class="chat-head"><span>LOQUIVOX CHAT</span><span class="live">● F4</span></div>
+        <div class="bubble user">What does this stack trace mean?</div>
+        <div class="bubble ai">It's a null pointer in your config loader — the TOML file is missing the [audio] section.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="privacy" style="background: var(--bg-elevated); border-block: 1px solid var(--border);">
+  <div class="container">
+    <h2 class="section-title">Your words stay yours</h2>
+    <p class="section-sub">Choose your transcription engine. Go fully local, or plug in the cloud provider you trust.</p>
+    <div class="engine-cols">
+      <div class="card">
+        <div class="icon">🔒</div>
+        <h3>100% offline</h3>
+        <ul>
+          <li>Local whisper.cpp engine — no internet, no API key</li>
+          <li>Models from tiny to large-v3-turbo</li>
+          <li>Static binaries built for x86_64 &amp; aarch64</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="icon">☁️</div>
+        <h3>Cloud, your pick</h3>
+        <ul>
+          <li>Groq — whisper-large-v3 at silly speeds</li>
+          <li>Deepgram nova-3 — live streaming transcription</li>
+          <li>OpenAI gpt-4o-transcribe</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="icon">🐧</div>
+        <h3>Linux-native</h3>
+        <ul>
+          <li>GTK3 overlays, gtk-layer-shell on Wayland</li>
+          <li>Tested on GNOME, Niri and X11 desktops</li>
+          <li>Global hotkeys via evdev — works everywhere</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="hotkeys">
+  <div class="container">
+    <h2 class="section-title">The command center</h2>
+    <p class="section-sub">Six keys, fully customizable — combos supported.</p>
+    <div class="hotkeys">
+      <div class="hotkey"><kbd>F3</kbd><div class="name">Dictate</div><div class="desc">Voice → text at cursor</div></div>
+      <div class="hotkey"><kbd>F4</kbd><div class="name">Chat</div><div class="desc">Open AI conversation</div></div>
+      <div class="hotkey"><kbd>F7</kbd><div class="name">Rewrite</div><div class="desc">Modify selected text</div></div>
+      <div class="hotkey"><kbd>F8</kbd><div class="name">Vision</div><div class="desc">Screenshot + analysis</div></div>
+      <div class="hotkey"><kbd>F9</kbd><div class="name">Pin</div><div class="desc">Chat always on top</div></div>
+      <div class="hotkey"><kbd>F10</kbd><div class="name">TTS</div><div class="desc">Toggle voice feedback</div></div>
+    </div>
+  </div>
+</section>
+
+<section id="install" style="background: var(--bg-elevated); border-block: 1px solid var(--border);">
+  <div class="container">
+    <h2 class="section-title">Get Loquivox</h2>
+    <p class="section-sub">Pick your flavor. Every path ends with you talking to your computer.</p>
+    <div class="tabs">
+      <div class="tab-buttons">
+        <button class="tab-btn active" data-tab="arch">Arch Linux (AUR)</button>
+        <button class="tab-btn" data-tab="deb">Debian / Ubuntu</button>
+        <button class="tab-btn" data-tab="script">Any distro (script)</button>
+      </div>
+
+      <div class="tab-panel active" id="tab-arch">
+        <div class="codeblock"><button class="copy-btn">Copy</button><span class="cm"># with an AUR helper</span>
+yay -S loquivox
+
+<span class="cm"># allow global hotkeys, then log out &amp; back in</span>
+sudo usermod -aG input $USER</div>
+        <p class="tab-note">Builds a static <code>whisper-cli</code> for offline transcription out of the box.</p>
+      </div>
+
+      <div class="tab-panel" id="tab-deb">
+        <div class="codeblock"><button class="copy-btn">Copy</button><span class="cm"># download the latest .deb from the releases page, then:</span>
+sudo apt install ./loquivox_*_amd64.deb
+
+<span class="cm"># allow global hotkeys, then log out &amp; back in</span>
+sudo usermod -aG input $USER</div>
+        <p class="tab-note">Get the package on the <a href="https://github.com/Xhelliom/loquivox/releases" target="_blank" rel="noopener">releases page</a>.</p>
+      </div>
+
+      <div class="tab-panel" id="tab-script">
+        <div class="codeblock"><button class="copy-btn">Copy</button><span class="cm"># clone and run the setup script — it detects your distro &amp; session</span>
+git clone https://github.com/Xhelliom/loquivox.git &amp;&amp; cd loquivox
+./setup.sh
+
+<span class="cm"># allow global hotkeys, then log out &amp; back in</span>
+sudo usermod -aG input $USER
+
+<span class="cm"># launch</span>
+loquivox</div>
+        <p class="tab-note">Works on Debian, Ubuntu and Arch — X11 and Wayland are auto-detected.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="container">
+    <div class="links">
+      <a href="https://github.com/Xhelliom/loquivox" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://github.com/Xhelliom/loquivox/issues" target="_blank" rel="noopener">Issues</a>
+      <a href="https://github.com/Xhelliom/loquivox/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a>
+    </div>
+    <p>Loquivox — a voice assistant &amp; AI companion for Linux. Free and open source.</p>
+  </div>
+</footer>
+
+<script>
+// Theme: saved preference > system preference
+const root = document.documentElement;
+const toggle = document.getElementById('theme-toggle');
+function applyTheme(t) {
+  root.setAttribute('data-theme', t);
+  toggle.textContent = t === 'dark' ? '☀️' : '🌙';
+}
+applyTheme(localStorage.getItem('theme') ||
+  (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+toggle.addEventListener('click', () => {
+  const next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+  localStorage.setItem('theme', next);
+  applyTheme(next);
+});
+
+// Install tabs
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+  });
+});
+
+// Copy buttons
+document.querySelectorAll('.copy-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const text = btn.parentElement.innerText.replace(/^Copy\n?/, '');
+    navigator.clipboard.writeText(text).then(() => {
+      btn.textContent = 'Copied!';
+      setTimeout(() => btn.textContent = 'Copy', 1600);
+    });
+  });
+});
+</script>
+</body>
+</html>
