@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Loquivox
+GenericName=Voice Dictation
+Comment=Voice-Assistant & AI Companion for Linux
+Exec=loquivox
+Icon=loquivox
+Terminal=false
+Categories=Utility;Accessibility;
+Keywords=voice;dictation;speech;transcription;whisper;ai;
+StartupNotify=false

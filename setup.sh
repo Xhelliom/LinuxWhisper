@@ -8,7 +8,7 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
 
-echo -e "${BLUE}🛠  LinuxWhisper Setup${NC}"
+echo -e "${BLUE}🛠  Loquivox Setup${NC}"
 
 # ---------------------------------------------------------------------------
 # 1. Detect Distribution
@@ -48,13 +48,14 @@ if [ "$DISTRO" = "debian" ]; then
         python3-venv python3-pip \
         libgirepository1.0-dev gcc libcairo2-dev pkg-config python3-dev \
         gir1.2-gtk-3.0 gir1.2-ayatanaappindicator3-0.1 gir1.2-webkit2-4.1 \
-        libspeexdsp-dev xclip
+        libspeexdsp-dev xclip \
+        cmake build-essential git
 
     if [ "$SESSION_TYPE" = "wayland" ]; then
         echo -e "${BLUE}📦 Installing Wayland-specific packages...${NC}"
         sudo apt install -y wtype wl-clipboard grim gtk-layer-shell-dev
     else
-        sudo apt install -y xdotool gnome-screenshot
+        sudo apt install -y xdotool x11-utils gnome-screenshot
     fi
 
 elif [ "$DISTRO" = "arch" ]; then
@@ -62,13 +63,14 @@ elif [ "$DISTRO" = "arch" ]; then
         python python-pip \
         gobject-introspection gcc cairo pkgconf \
         gtk3 libayatana-appindicator webkit2gtk-4.1 \
-        speexdsp python-evdev
+        speexdsp python-evdev \
+        cmake git make
 
     if [ "$SESSION_TYPE" = "wayland" ]; then
         echo -e "${BLUE}📦 Installing Wayland-specific packages...${NC}"
         sudo pacman -S --noconfirm --needed wtype wl-clipboard grim gtk-layer-shell
     else
-        sudo pacman -S --noconfirm --needed xdotool xclip gnome-screenshot
+        sudo pacman -S --noconfirm --needed xdotool xclip xorg-xprop gnome-screenshot
     fi
 fi
 
@@ -102,16 +104,52 @@ fi
 # ---------------------------------------------------------------------------
 # 6. Install Package (editable mode)
 # ---------------------------------------------------------------------------
-echo -e "${BLUE}⬇️  Installing LinuxWhisper package...${NC}"
+echo -e "${BLUE}⬇️  Installing Loquivox package...${NC}"
 ./venv/bin/pip install --upgrade pip
 ./venv/bin/pip install -e .
+
+# ---------------------------------------------------------------------------
+# 6b. Build & bundle the offline engine (whisper.cpp whisper-cli)
+# ---------------------------------------------------------------------------
+# Offline transcription uses the standalone whisper-cli binary. The .deb/AUR
+# packages ship it; a from-source install must build it here, otherwise the
+# offline backend (and the settings "download" button) won't work. The backend
+# discovers it at <venv>/lib/loquivox/whisper-cli (i.e. sys.prefix/lib/...).
+WHISPER_VER="$(tr -d '[:space:]' < packaging/whisper-cpp.version)"
+ENGINE_DEST="venv/lib/loquivox/whisper-cli"
+if [ -f "$ENGINE_DEST" ]; then
+    echo -e "${BLUE}🎙️  Offline engine already present (${ENGINE_DEST}).${NC}"
+else
+    echo -e "${BLUE}🎙️  Building offline engine whisper-cli (${WHISPER_VER})…${NC}"
+    set +e
+    (
+        set -e
+        TMP="$(mktemp -d)"
+        trap 'rm -rf "$TMP"' EXIT
+        git clone --depth 1 --branch "$WHISPER_VER" \
+            https://github.com/ggml-org/whisper.cpp.git "$TMP/wcpp"
+        cmake -S "$TMP/wcpp" -B "$TMP/wcpp/build" \
+            -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF \
+            -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_EXAMPLES=ON \
+            -DWHISPER_BUILD_SERVER=OFF
+        cmake --build "$TMP/wcpp/build" -j"$(nproc)" --target whisper-cli
+        install -Dm755 "$TMP/wcpp/build/bin/whisper-cli" "$ENGINE_DEST"
+    )
+    set -e
+    if [ -f "$ENGINE_DEST" ]; then
+        echo -e "${GREEN}✅ Offline engine installed → ${ENGINE_DEST}${NC}"
+    else
+        echo -e "${YELLOW}⚠️  Offline engine build failed — cloud backends still work.${NC}"
+        echo -e "${YELLOW}   Retry setup.sh later, or install the 'whisper.cpp' package.${NC}"
+    fi
+fi
 
 # ---------------------------------------------------------------------------
 # 7. Optional Autostart
 # ---------------------------------------------------------------------------
 echo ""
 echo -e "${BLUE}🚀 Autostart Setup${NC}"
-read -p "Add LinuxWhisper to autostart? (y/N): " add_autostart
+read -p "Add Loquivox to autostart? (y/N): " add_autostart
 if [[ "$add_autostart" =~ ^[yYjJ] ]]; then
     # Parse GROQ_API_KEY from .bashrc or environment if it exists
     API_KEY=""
@@ -121,16 +159,16 @@ if [[ "$add_autostart" =~ ^[yYjJ] ]]; then
 
     AUTOSTART_DIR="$HOME/.config/autostart"
     mkdir -p "$AUTOSTART_DIR"
-    DESKTOP_FILE="$AUTOSTART_DIR/linuxwhisper.desktop"
+    DESKTOP_FILE="$AUTOSTART_DIR/loquivox.desktop"
     
     # Write desktop file
     echo "[Desktop Entry]" > "$DESKTOP_FILE"
     echo "Type=Application" >> "$DESKTOP_FILE"
-    echo "Name=LinuxWhisper" >> "$DESKTOP_FILE"
+    echo "Name=Loquivox" >> "$DESKTOP_FILE"
     echo "Comment=Voice-Assistant & AI Companion for Linux" >> "$DESKTOP_FILE"
     echo "Icon=$PWD/assets/logo.png" >> "$DESKTOP_FILE"
     
-    EXEC_CMD="$PWD/venv/bin/linuxwhisper"
+    EXEC_CMD="$PWD/venv/bin/loquivox"
     
     if [ -n "$API_KEY" ]; then
         echo "Exec=env GROQ_API_KEY=\"$API_KEY\" $EXEC_CMD" >> "$DESKTOP_FILE"
@@ -154,13 +192,13 @@ if [ "$SESSION_TYPE" = "wayland" ] && command -v niri &>/dev/null; then
     echo -e "${BLUE}📝 Niri Tip:${NC} For best overlay behaviour, add this to ~/.config/niri/config.kdl:"
     echo ""
     echo '  layer-rule {
-      match namespace="linuxwhisper-recording"
+      match namespace="loquivox-recording"
       // Recording overlay: no shadow, no blur
       shadow { on false }
   }
 
   layer-rule {
-      match namespace="linuxwhisper-chat"
+      match namespace="loquivox-chat"
       // Chat overlay
       shadow { on false }
   }'
@@ -175,10 +213,10 @@ echo -e "${BLUE}🔒 Setting permissions for multi-user access...${NC}"
 chmod -R a+rX venv
 
 echo ""
-echo "To run LinuxWhisper:"
+echo "To run Loquivox:"
 echo "  1. Set your API key: export GROQ_API_KEY=\"your_key\""
-echo "  2. Run: linuxwhisper"
-echo "     Or:  python -m linuxwhisper"
+echo "  2. Run: loquivox"
+echo "     Or:  python -m loquivox"
 echo ""
 echo "Session: $SESSION_TYPE | Distro: $DISTRO"
 echo ""
