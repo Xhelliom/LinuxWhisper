@@ -14,7 +14,10 @@ from typing import Any, Dict, List, Optional, Tuple
 import evdev
 from evdev import InputDevice, ecodes
 
-from loquivox.config import CFG, MODIFIER_CODES, modifier_name, resolve_hotkeys
+from loquivox.config import (
+    CFG, MODIFIER_CODES, POSTPROCESS_LEVELS, POSTPROCESS_MAX_LEVEL,
+    modifier_name, resolve_hotkeys,
+)
 from loquivox.handlers.mode import ModeHandler
 from loquivox.managers.chat import ChatManager
 from loquivox.managers.overlay import OverlayManager
@@ -215,7 +218,7 @@ class KeyboardHandler:
         # event.value == 2 (autorepeat): ignore
 
     # Hotkeys that act on the session itself rather than starting a recording.
-    _NON_RECORDING_ACTIONS = ("pin", "tts", "cancel", "pause")
+    _NON_RECORDING_ACTIONS = ("pin", "tts", "cancel", "pause", "refine")
 
     @classmethod
     def _on_press(cls, mode: str) -> None:
@@ -229,6 +232,12 @@ class KeyboardHandler:
         if mode == "pause":
             if STATE.recording:
                 cls._toggle_pause()
+            return
+
+        # Stop the active recording, then pick a refinement level for it.
+        if mode == "refine":
+            if STATE.recording:
+                cls._stop_and_choose()
             return
 
         # Pin toggle (non-recording action)
@@ -313,6 +322,138 @@ class KeyboardHandler:
             ModeHandler.process_audio_async(STATE.current_mode, audio_data)
         else:
             OverlayManager.hide()
+
+    # --- On-the-fly refinement chooser (bound to the 'refine' hotkey) --------
+
+    @classmethod
+    def _stop_and_choose(cls) -> None:
+        """
+        Stop the recording, then let the user pick a refinement level for THIS
+        dictation (overriding the configured default) before processing.
+        Runs the (blocking, grabbed) chooser in a background thread.
+        """
+        import threading
+
+        audio_data = AudioService.stop_recording()
+        session = STATE.stream_session
+        STATE.stream_session = None
+        mode = STATE.current_mode
+        generation = STATE.recording_generation
+        if session is None and audio_data is None:
+            OverlayManager.hide()
+            return
+        threading.Thread(
+            target=cls._refine_choose_worker,
+            args=(mode, session, audio_data, generation),
+            daemon=True,
+        ).start()
+
+    @classmethod
+    def _refine_choose_worker(cls, mode, session, audio_data, generation) -> None:
+        """Show the chooser, then route processing with the chosen level."""
+        default = int(CFG.POSTPROCESS_LEVEL or 0)
+        level = cls.capture_refinement(default)
+        if level is None:  # cancelled
+            OverlayManager.hide(generation)
+            print("✖️  Refinement choice cancelled — nothing inserted")
+            return
+        OverlayManager.set_transcribing()
+        if session is not None:
+            ModeHandler.process_stream_async(mode, session, audio_data, level_override=level)
+        elif audio_data is not None:
+            ModeHandler.process_audio_async(mode, audio_data, level_override=level)
+        else:
+            OverlayManager.hide(generation)
+
+    @staticmethod
+    def _refine_overlay_text(level: int) -> str:
+        name = dict(POSTPROCESS_LEVELS).get(level, level)
+        return f"Refine: {name}  •  0-{POSTPROCESS_MAX_LEVEL} / ←→ / Enter"
+
+    @classmethod
+    def capture_refinement(cls, default_level: int, timeout: float = 12.0) -> Optional[int]:
+        """
+        Grab the keyboard and let the user choose a refinement level (0..MAX),
+        shown live on the overlay. Returns the chosen level, or None if Esc is
+        pressed. Selection: digits 0-N, ←/→ to step, the 'refine' key again to
+        cycle, Enter to confirm; auto-confirms on timeout. Always ungrabs.
+        """
+        import time
+
+        level = max(0, min(POSTPROCESS_MAX_LEVEL, int(default_level)))
+        # Keys that cycle (re-pressing the 'refine' hotkey trigger).
+        cycle_codes = {trig for trig, _ in resolve_hotkeys(CFG).get("refine", [])}
+        digits = {}
+        for n in range(POSTPROCESS_MAX_LEVEL + 1):
+            digits[getattr(ecodes, f"KEY_{n}")] = n
+            kp = getattr(ecodes, f"KEY_KP{n}", None)
+            if kp is not None:
+                digits[kp] = n
+        confirm = {ecodes.KEY_ENTER, getattr(ecodes, "KEY_KPENTER", ecodes.KEY_ENTER)}
+
+        devices = cls._find_keyboards()
+        if not devices:
+            return level  # no input device → just use the default
+        sel = selectors.DefaultSelector()
+        grabbed: List[InputDevice] = []
+        for dev in devices:
+            try:
+                sel.register(dev, selectors.EVENT_READ)
+            except Exception:
+                continue
+            try:
+                dev.grab()
+                grabbed.append(dev)
+            except Exception:
+                pass
+
+        OverlayManager.set_live_text(cls._refine_overlay_text(level))
+        deadline = time.monotonic() + timeout
+        try:
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return level  # auto-confirm
+                for key_obj, _ in sel.select(timeout=remaining):
+                    try:
+                        events = list(key_obj.fileobj.read())
+                    except Exception:
+                        continue
+                    for event in events:
+                        if event.type != ecodes.EV_KEY or event.value != 1:
+                            continue
+                        code = event.code
+                        if code == ecodes.KEY_ESC:
+                            return None
+                        if code in confirm:
+                            return level
+                        if code in digits:
+                            level = digits[code]
+                        elif code == ecodes.KEY_LEFT:
+                            level = max(0, level - 1)
+                        elif code == ecodes.KEY_RIGHT:
+                            level = min(POSTPROCESS_MAX_LEVEL, level + 1)
+                        elif code in cycle_codes:
+                            level = (level + 1) % (POSTPROCESS_MAX_LEVEL + 1)
+                        else:
+                            continue
+                        deadline = time.monotonic() + timeout  # keep alive on activity
+                        OverlayManager.set_live_text(cls._refine_overlay_text(level))
+        finally:
+            for dev in grabbed:
+                try:
+                    dev.ungrab()
+                except Exception:
+                    pass
+            for dev in devices:
+                try:
+                    sel.unregister(dev)
+                except Exception:
+                    pass
+                try:
+                    dev.close()
+                except Exception:
+                    pass
 
     # Re-scan interval (seconds) to pick up keyboards that (re)appear, e.g.
     # after resume from suspend or USB hotplug.

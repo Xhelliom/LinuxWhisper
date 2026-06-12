@@ -233,6 +233,9 @@ class Config:
         "cancel":     ("Esc", ["ESC"]),
         # Pause / resume the current recording (capture is held, not stopped).
         "pause":      ("Space", ["SPACE"]),
+        # Stop the recording and choose this dictation's refinement level.
+        # Unbound by default — assign a key in Settings → Hotkeys.
+        "refine":     ("(unset)", []),
     })
 
 

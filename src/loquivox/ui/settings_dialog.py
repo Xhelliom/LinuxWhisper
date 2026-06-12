@@ -864,6 +864,7 @@ class SettingsDialog:
         "dictation": "Dictation", "ai": "AI Chat", "ai_rewrite": "Rewrite",
         "vision": "Vision", "pin": "Pin Chat", "tts": "TTS Toggle",
         "cancel": "Cancel", "pause": "Pause / Resume",
+        "refine": "Stop + choose level",
     }
 
     @classmethod
@@ -927,9 +928,6 @@ class SettingsDialog:
         parsed: dict = {}
         for mode_id, entry in cls._hotkey_entries.items():
             raw = entry.get_text().replace(",", " ").split()
-            if not raw:
-                cls._set_hotkey_status(f"❌ {mode_id}: at least one key is required.")
-                return
             specs = []
             for tok in raw:  # validate now so we never write a broken binding
                 try:
@@ -938,7 +936,7 @@ class SettingsDialog:
                     cls._set_hotkey_status(f"❌ invalid binding '{tok}' for {mode_id}.")
                     return
                 specs.append(tok.strip().upper())
-            parsed[mode_id] = specs
+            parsed[mode_id] = specs  # empty = unbound (e.g. the 'refine' action)
 
         from loquivox.config_io import ConfigWriteError, update_section
         try:

@@ -90,27 +90,33 @@ class PostProcessor:
         return out or None
 
     @classmethod
-    def process(cls, text: str) -> str:
-        """Return post-processed text, or the original when off / on failure."""
+    def _prompt_for_level(cls, level: int) -> Optional[str]:
+        """System prompt for a refinement level, or None for off / empty Custom."""
+        if level == config_module.POSTPROCESS_CUSTOM_LEVEL:
+            return (config_module.CFG.POSTPROCESS_CUSTOM_PROMPT or "").strip() or None
+        return _LEVEL_PROMPTS.get(level)
+
+    @classmethod
+    def process(cls, text: str, level_override: Optional[int] = None) -> str:
+        """
+        Return post-processed text, or the original when off / on failure.
+
+        ``level_override`` (0-5) forces a refinement level for this one call —
+        used by the on-the-fly chooser — bypassing the configured level/translate.
+        """
         cfg = config_module.CFG
         if not text:
             return text
 
-        if cfg.POSTPROCESS_TRANSLATE:
+        if level_override is None and cfg.POSTPROCESS_TRANSLATE:
             prompt = _TRANSLATE_PROMPT.format(lang=cls._lang_name(cfg.POSTPROCESS_TARGET_LANG))
             label = f"translate → {cfg.POSTPROCESS_TARGET_LANG}"
         else:
-            level = int(cfg.POSTPROCESS_LEVEL or 0)
-            if level == config_module.POSTPROCESS_CUSTOM_LEVEL:
-                prompt = (cfg.POSTPROCESS_CUSTOM_PROMPT or "").strip()
-                if not prompt:
-                    return text  # Custom selected but no prompt set → pass through
-                label = "custom"
-            elif level in _LEVEL_PROMPTS:
-                prompt = _LEVEL_PROMPTS[level]
-                label = f"level {level}"
-            else:
-                return text  # 0 = off
+            level = int(cfg.POSTPROCESS_LEVEL if level_override is None else level_override)
+            prompt = cls._prompt_for_level(level)
+            if not prompt:
+                return text  # off, or Custom with no prompt
+            label = f"level {level}"
 
         print(f"✨ Post-processing ({label})…")
         result = cls._run(text, prompt)

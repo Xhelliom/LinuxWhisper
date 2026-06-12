@@ -37,6 +37,7 @@ def main() -> None:
         "tts": "Toggle TTS (Read AI responses aloud)",
         "cancel": "Cancel recording / transcription (no text inserted)",
         "pause": "Pause / resume the current recording",
+        "refine": "Stop & choose this dictation's refinement level (unbound by default)",
     }
 
     i = 1

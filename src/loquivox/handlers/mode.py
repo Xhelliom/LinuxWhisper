@@ -81,23 +81,26 @@ class ModeHandler:
             print("✖️  Cancelled — nothing inserted")
 
     @staticmethod
-    def process_audio_async(mode: str, audio_data: np.ndarray) -> None:
+    def process_audio_async(mode: str, audio_data: np.ndarray,
+                            level_override: Optional[int] = None) -> None:
         """
         Transcribe and process audio off the calling thread.
 
         Safe to call from any thread (e.g. the keyboard listener): the
         blocking Groq call runs in a worker thread and all UI work is
         marshalled back to the GTK main loop via GLib.idle_add.
+        ``level_override`` forces a refinement level for this dictation.
         """
         generation = STATE.recording_generation
         threading.Thread(
             target=ModeHandler._process_worker,
-            args=(mode, audio_data, generation),
+            args=(mode, audio_data, generation, level_override),
             daemon=True,
         ).start()
 
     @staticmethod
-    def _process_worker(mode: str, audio_data: np.ndarray, generation: int) -> None:
+    def _process_worker(mode: str, audio_data: np.ndarray, generation: int,
+                        level_override: Optional[int] = None) -> None:
         """Worker thread for processing audio."""
         transcribed = None
         try:
@@ -106,7 +109,7 @@ class ModeHandler:
             pass
 
         if transcribed:
-            transcribed = ModeHandler._maybe_postprocess(mode, transcribed)
+            transcribed = ModeHandler._maybe_postprocess(mode, transcribed, level_override)
             # Run processing (API calls etc) on the GTK main thread
             GLib.idle_add(lambda: ModeHandler.process(mode, transcribed, generation))
         else:
@@ -115,36 +118,38 @@ class ModeHandler:
             OverlayManager.hide(generation)
 
     @staticmethod
-    def _maybe_postprocess(mode: str, text: str) -> str:
+    def _maybe_postprocess(mode: str, text: str, level_override: Optional[int] = None) -> str:
         """
-        Apply optional LLM post-processing to dictation text (correct /
-        reformulate / translate). Runs here in the worker thread so the LLM
-        round-trip never blocks the GTK loop. No-op unless mode is 'dictation'
-        and post-processing is enabled in config.
+        Apply optional LLM post-processing to dictation text (refinement level
+        or translate). Runs here in the worker thread so the LLM round-trip
+        never blocks the GTK loop. No-op unless mode is 'dictation'. A
+        ``level_override`` (from the on-the-fly chooser) forces that level.
         """
         if mode != "dictation":
             return text
         from loquivox.services.postprocess import PostProcessor
-        return PostProcessor.process(text)
+        return PostProcessor.process(text, level_override)
 
     @staticmethod
-    def process_stream_async(mode: str, session, audio_data: Optional[np.ndarray]) -> None:
+    def process_stream_async(mode: str, session, audio_data: Optional[np.ndarray],
+                             level_override: Optional[int] = None) -> None:
         """
         Finalize a live streaming session off-thread, then process the result.
 
         ``audio_data`` is the buffered recording, kept as the offline fallback
         if the live stream produced nothing (handled inside the dispatcher).
+        ``level_override`` forces a refinement level for this dictation.
         """
         generation = STATE.recording_generation
         threading.Thread(
             target=ModeHandler._stream_worker,
-            args=(mode, session, audio_data, generation),
+            args=(mode, session, audio_data, generation, level_override),
             daemon=True,
         ).start()
 
     @staticmethod
     def _stream_worker(mode: str, session, audio_data: Optional[np.ndarray],
-                       generation: int) -> None:
+                       generation: int, level_override: Optional[int] = None) -> None:
         """Worker thread: finalize the stream (with batch fallback) and process."""
         from loquivox.transcription import get_dispatcher
 
@@ -157,7 +162,7 @@ class ModeHandler:
             pass
 
         if transcribed:
-            transcribed = ModeHandler._maybe_postprocess(mode, transcribed)
+            transcribed = ModeHandler._maybe_postprocess(mode, transcribed, level_override)
             GLib.idle_add(lambda: ModeHandler.process(mode, transcribed, generation))
         else:
             OverlayManager.hide(generation)
