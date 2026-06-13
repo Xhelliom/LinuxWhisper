@@ -55,12 +55,17 @@ The app auto-detects your session type (X11 or Wayland) and uses the appropriate
 
 | Key | Action | Purpose |
 |:---:|:---|:---|
-| `F3` | **Dictate** | Transcribe voice to text at cursor |
-| `F4` | **Chat** | Open/Focus AI conversation |
+| `R-Alt` / `F3` | **Dictate** | Transcribe voice to text at cursor |
+| `F4` | **Chat** | Speak a question — or type it in the chat overlay — and the AI answers |
 | `F7` | **Rewrite** | Highlight text → Speak to modify |
 | `F8` | **Vision** | Screenshot + Intelligent Analysis |
 | `F9` | **Pin** | Toggle "Always on Top" for chat |
 | `F10` | **TTS** | Toggle AI voice feedback |
+| `Esc` | **Cancel** | Abort the active recording (nothing inserted) |
+| `Space` | **Pause** | Pause / resume the current recording |
+| *(unbound)* | **Refine** | Stop & pick this dictation's refinement level |
+
+> All keys are remappable in **Settings → Hotkeys**, including combos like `Alt+Space`. The `Refine` action has no default key — assign one to use it.
 
 ---
 

@@ -71,10 +71,30 @@ class ChatManager:
             is_tts=STATE.tts_enabled
         )
 
-        if not STATE.chat_pinned:
+        # Don't arm the auto-hide while the text input is focused, or the
+        # overlay would fade out from under the user mid-typing (an unrelated
+        # refresh — e.g. a TTS toggle — would otherwise re-arm it).
+        if not STATE.chat_pinned and not STATE.chat_input_focused:
             STATE.chat_hide_timer = GLib.timeout_add_seconds(
                 CFG.CHAT_AUTO_HIDE_SEC,
                 ChatManager._auto_hide
+            )
+
+    @staticmethod
+    def set_keepalive(active: bool) -> None:
+        """
+        Pause the auto-hide timer while the chat input box is focused, and
+        resume it on blur. The ``chat_input_focused`` flag also makes
+        ``_show_overlay`` skip re-arming the timer on unrelated refreshes, so
+        the overlay can't vanish mid-typing. No-op when pinned. Main thread only.
+        """
+        STATE.chat_input_focused = active
+        if active:
+            ChatManager._cancel_timer()
+        elif not STATE.chat_pinned and STATE.chat_overlay_window:
+            ChatManager._cancel_timer()
+            STATE.chat_hide_timer = GLib.timeout_add_seconds(
+                CFG.CHAT_AUTO_HIDE_SEC, ChatManager._auto_hide
             )
 
     @staticmethod

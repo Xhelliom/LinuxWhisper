@@ -98,3 +98,21 @@ class OverlayManager:
             except Exception:
                 pass
             STATE.overlay_window = None
+
+    @staticmethod
+    def hide_immediate() -> None:
+        """
+        Destroy the overlay synchronously, skipping the fade-out.
+
+        Unlike ``hide()`` (which marshals onto the GTK loop and fades out over
+        ~370 ms), this tears the window down right away. MUST be called from the
+        GTK main thread — used before a Vision screenshot so the overlay is gone
+        from the captured image.
+        """
+        win = STATE.overlay_window
+        STATE.overlay_window = None
+        if win is not None:
+            try:
+                win.close_immediate()
+            except Exception:
+                pass

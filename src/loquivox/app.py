@@ -30,9 +30,9 @@ def main() -> None:
 
     descriptions = {
         "dictation": "Live dictation at cursor position (Whisper V3)",
-        "ai": "Empathic AI question (Groq Moonshot)",
+        "ai": f"Empathic AI question ({CFG.MODEL_CHAT})",
         "ai_rewrite": "Smart Rewrite - Highlight text & speak to edit",
-        "vision": "Empathic Vision / Screenshot (Groq Llama 4)",
+        "vision": f"Empathic Vision / Screenshot ({CFG.MODEL_VISION})",
         "pin": "Toggle Chat Overlay Pin Mode",
         "tts": "Toggle TTS (Read AI responses aloud)",
         "cancel": "Cancel recording / transcription (no text inserted)",

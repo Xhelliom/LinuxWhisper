@@ -220,6 +220,40 @@ html, body {{
   font-size: 11px; padding: 3px 10px; border-radius: 10px;
   margin: 10px 0; border: 1px solid {white_alpha05};
 }}
+
+/* Text input bar (type to chat, in addition to voice) */
+.chat-input-bar {{
+  flex-shrink: 0;
+  display: flex; align-items: flex-end; gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid {accent_alpha20};
+  background: {bg_rgba};
+  z-index: 20;
+}}
+.chat-input-bar textarea {{
+  flex: 1; resize: none;
+  background: {white_alpha05};
+  color: {text};
+  border: 1px solid {accent_alpha20};
+  border-radius: 12px;
+  padding: 9px 12px;
+  font-family: inherit; font-size: 13px; line-height: 1.4;
+  max-height: 120px; overflow-y: auto;
+  outline: none;
+}}
+.chat-input-bar textarea::placeholder {{ color: {dim_text}; }}
+.chat-input-bar textarea:focus {{ border-color: {accent}; }}
+.send-btn {{
+  flex-shrink: 0;
+  width: 36px; height: 36px; border-radius: 10px;
+  border: none; cursor: pointer;
+  background: {accent}; color: {text_on_accent};
+  font-size: 15px; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+  transition: transform 0.15s, opacity 0.2s;
+}}
+.send-btn:hover {{ transform: scale(1.06); }}
+.send-btn:active {{ transform: scale(0.96); }}
 '''
 
 CHAT_JS = '''
@@ -239,6 +273,36 @@ function copyText(btn, index) {
 function signalDrag() {
   window.webkit.messageHandlers.signal.postMessage(JSON.stringify({action: 'Drag'}));
 }
+
+function sendMessage() {
+  const ta = document.getElementById('chat-input');
+  if (!ta) return;
+  const text = ta.value.trim();
+  if (!text) return;
+  window.webkit.messageHandlers.signal.postMessage(JSON.stringify({action: 'Send', content: text}));
+  ta.value = '';
+  ta.style.height = 'auto';
+}
+
+// Wire up the input box: Enter sends (Shift+Enter = newline), focus/blur
+// pause the auto-hide timer, and the box grows with its content.
+(function initInput() {
+  const ta = document.getElementById('chat-input');
+  if (!ta) return;
+  ta.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+  });
+  ta.addEventListener('focus', () => {
+    window.webkit.messageHandlers.signal.postMessage(JSON.stringify({action: 'KeepAlive', state: 'focus'}));
+  });
+  ta.addEventListener('blur', () => {
+    window.webkit.messageHandlers.signal.postMessage(JSON.stringify({action: 'KeepAlive', state: 'blur'}));
+  });
+  ta.addEventListener('input', () => {
+    ta.style.height = 'auto';
+    ta.style.height = Math.min(ta.scrollHeight, 120) + 'px';
+  });
+})();
 
 function copyCode(btn) {
   const code = btn.nextElementSibling.querySelector('code');
@@ -296,6 +360,10 @@ CHAT_HTML_TEMPLATE = '''<!DOCTYPE html>
   {pin_hint}
   <div class="chat-scroll-area" id="scroll-area">
     <div id="chat" class="chat-container">{messages}</div>
+  </div>
+  <div class="chat-input-bar">
+    <textarea id="chat-input" rows="1" placeholder="Type a message…"></textarea>
+    <button class="send-btn" onclick="sendMessage()" title="Send">&#10148;</button>
   </div>
 </div>
 <script>{CHAT_JS}</script>
@@ -407,6 +475,16 @@ class ChatOverlay(Gtk.Window):
                 content = msg.get('content', '')
                 clipboard = get_clipboard()
                 clipboard.copy(content)
+            elif action == 'Send':
+                content = msg.get('content', '').strip()
+                if content:
+                    # Late import to avoid a circular import at module load.
+                    from loquivox.handlers.mode import ModeHandler
+                    ModeHandler.submit_text_chat(content)
+            elif action == 'KeepAlive':
+                # Pause the auto-hide while the input box has focus, resume on blur.
+                from loquivox.managers.chat import ChatManager
+                ChatManager.set_keepalive(msg.get('state') == 'focus')
         except Exception as e:
             print(f"❌ ScriptMessage Error: {e}")
 

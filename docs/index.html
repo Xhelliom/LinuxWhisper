@@ -430,7 +430,7 @@ footer .links { display: flex; gap: 22px; justify-content: center; margin-bottom
       <div class="card reveal">
         <div class="icon">💬</div>
         <h3>AI Chat<span class="key">F4</span></h3>
-        <p>A lightweight chat overlay for quick questions and conversations, always one keystroke away. Pin it on top with F9.</p>
+        <p>Hold F4 to ask out loud, or type straight into the overlay. Answers land in the chat (and at your cursor for voice). Pin it on top with F9.</p>
       </div>
       <div class="card reveal">
         <div class="icon">✍️</div>
@@ -534,10 +534,10 @@ footer .links { display: flex; gap: 22px; justify-content: center; margin-bottom
 <section id="hotkeys" style="scroll-margin-top: 80px;">
   <div class="container">
     <h2 class="section-title reveal">The command center</h2>
-    <p class="section-sub reveal">Six keys, fully customizable — combos supported.</p>
+    <p class="section-sub reveal">Customizable down to the keystroke — combos supported, too.</p>
     <div class="keyboard reveal">
       <div class="keys-row" id="keys-row">
-        <div class="kkey">Esc</div>
+        <div class="kkey mapped" data-key="Escape">Esc</div>
         <div class="kkey">F1</div>
         <div class="kkey">F2</div>
         <div class="kkey mapped" data-key="F3">F3</div>
@@ -559,6 +559,7 @@ footer .links { display: flex; gap: 22px; justify-content: center; margin-bottom
         </div>
       </div>
       <p class="kb-hint">Click a glowing key — or <span class="real">press the real one</span> on your keyboard. Go on, this page is listening too. 😉</p>
+      <p class="kb-hint">While recording: <span class="real">Esc</span> cancels, <span class="real">Space</span> pauses &amp; resumes, and an optional <span class="real">Refine</span> key lets you pick this dictation's polish level on the fly.</p>
     </div>
   </div>
 </section>
@@ -739,7 +740,8 @@ const ACTIONS = {
   F7:  { icon: '✍️', title: 'Rewrite',  desc: 'Select text anywhere, press F7, and say how it should change. "Make it sound less grumpy."' },
   F8:  { icon: '👁️', title: 'Vision',   desc: 'Screenshot + question in one move. Great for cryptic error dialogs and other people\'s code.' },
   F9:  { icon: '📌', title: 'Pin',      desc: 'Nail the chat overlay on top of everything. Unpin when you need your screen back.' },
-  F10: { icon: '🔊', title: 'Voice feedback', desc: 'Let the AI talk back. Orpheus TTS reads answers aloud — toggle anytime.' }
+  F10: { icon: '🔊', title: 'Voice feedback', desc: 'Let the AI talk back. Orpheus TTS reads answers aloud — toggle anytime.' },
+  Escape: { icon: '✖️', title: 'Cancel', desc: 'Bail out of a recording mid-sentence — nothing gets transcribed or inserted.' }
 };
 const kpIcon = document.getElementById('kp-icon'),
       kpTitle = document.getElementById('kp-title'),

@@ -215,18 +215,9 @@ class ModeHandler:
         response = AIService.chat(text)
         if not response:
             return
-
-        # Update histories
-        HistoryManager.add_message("user", text)
-        HistoryManager.add_message("assistant", response)
-        HistoryManager.add_answer(response)
-
-        # Update chat overlay
-        ChatManager.add_message("user", text)
-        ChatManager.add_message("assistant", response)
-
-        ClipboardService.type_text(response)
-        TTSService.speak(response)
+        ModeHandler._deliver_response(
+            response, history_user=text, chat_user_text=text, output="type"
+        )
 
     @staticmethod
     def _handle_ai_rewrite(text: str) -> None:
@@ -243,38 +234,134 @@ class ModeHandler:
         response = AIService.chat(prompt)
         if not response:
             return
-
-        # Update histories
-        HistoryManager.add_message("user", f"[Rewrite] {text}\nOriginal: {original[:200]}...")
-        HistoryManager.add_message("assistant", response)
-        HistoryManager.add_answer(response)
-
-        # Update chat overlay
-        ChatManager.add_message("user", f"✍️ {text}")
-        ChatManager.add_message("assistant", response)
-
-        ClipboardService.paste_text(response)
-        TTSService.speak(response)
+        ModeHandler._deliver_response(
+            response,
+            history_user=f"[Rewrite] {text}\nOriginal: {original[:200]}...",
+            chat_user_text=f"✍️ {text}",
+            output="paste",
+        )
 
     @staticmethod
     def _handle_vision(text: str) -> None:
-        """Handle vision mode: screenshot + AI analysis."""
+        """
+        Handle vision mode: screenshot + AI analysis.
+
+        Runs on the GTK main thread. The recording overlay is torn down
+        *immediately* (no fade) so it never lands in the screenshot, then the
+        blocking capture + vision call are handed to a worker thread.
+        """
+        OverlayManager.hide_immediate()
+        # Capture the generation now (process() already validated it) so a late
+        # vision answer from a superseded/cancelled recording is dropped on
+        # delivery instead of being typed into a newer session.
+        generation = STATE.recording_generation
+        threading.Thread(
+            target=ModeHandler._vision_worker, args=(text, generation), daemon=True
+        ).start()
+
+    @staticmethod
+    def _vision_worker(text: str, generation: int) -> None:
+        """Worker: wait out the compositor repaint, capture, then ask the model."""
+        import time
+
+        # Give the compositor a frame to drop the just-destroyed overlay before
+        # grabbing the screen (the window is already gone, this is just paint).
+        time.sleep(0.12)
+
         image_b64 = ImageService.take_screenshot()
         if not image_b64:
             return
-
         response = AIService.vision(text, image_b64)
         if not response:
             return
+        GLib.idle_add(lambda: ModeHandler._deliver_response(
+            response,
+            history_user=f"[Screenshot] {text}",
+            chat_user_text=f"📸 {text}",
+            generation=generation,
+            output="type",
+        ))
 
-        # Update histories
-        HistoryManager.add_message("user", f"[Screenshot] {text}")
+    @staticmethod
+    def _deliver_response(response: str, *, history_user: str,
+                          chat_user_text: Optional[str] = None,
+                          generation: Optional[int] = None,
+                          output: Optional[str] = "type") -> None:
+        """
+        Record an AI answer everywhere (histories, chat overlay), optionally emit
+        it at the cursor, and speak it. The single delivery path for every mode.
+        Runs on the GTK main thread.
+
+        - ``generation``: when given, the answer is dropped if a newer recording
+          has superseded it (the same stale-guard as ``process()``).
+        - ``chat_user_text``: user bubble to add to the overlay; pass ``None`` when
+          the caller already echoed it (typed chat).
+        - ``output``: ``"type"`` types at the cursor, ``"paste"`` pastes over the
+          selection (rewrite), ``None`` emits nothing (typed chat).
+        """
+        if generation is not None and generation != STATE.recording_generation:
+            print(f"⏭️ Dropped stale AI answer (gen {generation})")
+            return
+
+        HistoryManager.add_message("user", history_user)
         HistoryManager.add_message("assistant", response)
         HistoryManager.add_answer(response)
 
-        # Update chat overlay
-        ChatManager.add_message("user", f"📸 {text}")
+        if chat_user_text is not None:
+            ChatManager.add_message("user", chat_user_text)
         ChatManager.add_message("assistant", response)
 
-        ClipboardService.type_text(response)
+        if output == "type":
+            ClipboardService.type_text(response)
+        elif output == "paste":
+            ClipboardService.paste_text(response)
         TTSService.speak(response)
+
+    # --- Typed chat (from the chat overlay input box) ------------------------
+
+    @staticmethod
+    def submit_text_chat(text: str) -> None:
+        """
+        Handle a message typed into the chat overlay (not voice).
+
+        Shows the user's message right away, then runs the LLM call off-thread.
+        Unlike the voice path, the answer is NOT typed at the cursor (focus is on
+        the overlay, not another app) — it only lands in the chat + optional TTS.
+        A new submission is ignored while one is still in flight, so concurrent
+        workers can't deliver answers out of order. Safe to call from the GTK
+        main thread (the WebKit message handler).
+        """
+        text = (text or "").strip()
+        if not text:
+            return
+        if STATE.chat_busy:
+            print("⏳ Chat busy — ignoring submission until the current answer arrives")
+            return
+        STATE.chat_busy = True
+        ChatManager.add_message("user", text)  # echo immediately
+        threading.Thread(
+            target=ModeHandler._text_chat_worker, args=(text,), daemon=True
+        ).start()
+
+    @staticmethod
+    def _text_chat_worker(text: str) -> None:
+        """Worker: call the chat model, then deliver the answer to the overlay."""
+        # chat() builds its messages from the current history, so call it BEFORE
+        # appending this turn (avoids a duplicated turn). @safe_execute returns
+        # None on failure, so this never raises.
+        response = AIService.chat(text)
+        if not response:
+            STATE.chat_busy = False  # nothing to deliver — free the lock now
+            return
+
+        def _done():
+            # User bubble was already echoed by submit_text_chat → chat_user_text=None.
+            ModeHandler._deliver_response(
+                response, history_user=text, chat_user_text=None, output=None
+            )
+            # Release only AFTER this turn is in conversation_history, so the next
+            # submission's chat() call sees it (keeps turns correctly ordered).
+            STATE.chat_busy = False
+            return False
+
+        GLib.idle_add(_done)

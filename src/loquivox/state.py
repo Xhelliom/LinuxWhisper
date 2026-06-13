@@ -103,6 +103,12 @@ class AppState:
     chat_pinned: bool = False
     chat_enabled: bool = True
     chat_hide_timer: Optional[int] = None
+    # True while the chat overlay's text input has focus — suppresses auto-hide
+    # so the overlay can't vanish mid-typing.
+    chat_input_focused: bool = False
+    # True while a typed-chat request is in flight — serializes submissions so
+    # two concurrent workers can't deliver answers out of order.
+    chat_busy: bool = False
 
     # --- History ---
     conversation_history: List[Dict[str, str]] = field(default_factory=list)

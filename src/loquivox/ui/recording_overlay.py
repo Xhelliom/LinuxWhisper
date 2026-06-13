@@ -539,3 +539,23 @@ class GtkOverlay(Gtk.Window):
         if self._closing:
             return
         self._closing = True  # _animate fades opacity to 0, then destroys
+
+    def close_immediate(self) -> None:
+        """
+        Destroy the window at once, skipping the ~370 ms fade-out.
+
+        Used right before a Vision screenshot so the overlay never lingers
+        in the captured image. Cancels the animation tick first so it can't
+        fire on a destroyed window.
+        """
+        self._closing = True
+        if self.timeout_id is not None:
+            try:
+                GLib.source_remove(self.timeout_id)
+            except Exception:
+                pass
+            self.timeout_id = None
+        try:
+            self.destroy()
+        except Exception:
+            pass
